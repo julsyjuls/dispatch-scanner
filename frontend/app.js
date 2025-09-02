@@ -3,17 +3,16 @@ const $ = (sel) => document.querySelector(sel);
 // 🔒 Hardcode your Worker URL
 const API_URL = "https://dispatch-api.julsyjuls.workers.dev";
 
-// --- get dispatch_id from URL only ---
+// Get dispatch_id from URL only
 function getDispatchIdFromURL() {
   const params = new URLSearchParams(location.search);
   const did = params.get('dispatch_id');
   const n = Number(did || 0);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
-
 let DISPATCH_ID = getDispatchIdFromURL();
 
-// Optional: show a badge like “Dispatch #1234”
+// Show badge
 (function showBadge() {
   const badge = $('#dispatchBadge');
   if (!badge) return;
@@ -21,28 +20,12 @@ let DISPATCH_ID = getDispatchIdFromURL();
     badge.textContent = `Dispatch #${DISPATCH_ID}`;
     badge.style.display = 'inline-block';
   } else {
-    badge.textContent = 'No dispatch selected';
+    badge.textContent = 'No dispatch selected — open this from Softr';
     badge.style.display = 'inline-block';
   }
 })();
 
-// Disable UI if opened without a dispatch_id
-(function guardOpenWithoutId() {
-  const scan = $('#scanInput');
-  const finalize = $('#finalizeBtn');
-  if (!DISPATCH_ID) {
-    if (scan) {
-      scan.disabled = true;
-      scan.placeholder = 'Open from Softr dispatch details (missing ?dispatch_id=...)';
-    }
-    if (finalize) finalize.disabled = true;
-    if (typeof setFeedback === 'function') {
-      setFeedback('Missing Dispatch ID. Open this page via Softr dispatch details.', false);
-    }
-  }
-})();
-
-// ------------ render + counts (your existing state helpers) ------------
+// Render helpers (reuse your existing state object)
 function render() {
   const list = $('#scanList');
   list.innerHTML = '';
@@ -68,38 +51,40 @@ function bumpSkuCount(sku_id) {
   state.skuCounts.set(sku_id, n + 1);
 }
 
-// ------------ Finalize (backend reads date from header in Softr) ------------
-$('#finalizeBtn').addEventListener('click', async () => {
-  if (!DISPATCH_ID) {
-    setFeedback('Missing Dispatch ID. Open from Softr dispatch details.', false);
-    return;
-  }
-  try {
-    const res = await fetch(`${API_URL}/api/finalize`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dispatch_id: DISPATCH_ID }) // no date here
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.msg || data.error || 'Finalize failed');
-    setFeedback(`Finalized. Updated ${data.updated} item(s).`);
-  } catch (e) {
-    setFeedback(String(e.message || e), false);
-  }
-});
-
-// ------------ Scan → Reserve ------------
+// Scan → Reserve
 $('#scanInput').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
   const barcode = e.target.value.trim();
   e.target.value = '';
 
   if (!DISPATCH_ID) {
-    setFeedback('Missing Dispatch ID. Open from Softr dispatch details.', false);
+    setFeedback('Missing Dispatch ID. Open this page via Softr dispatch details.', false);
     return;
   }
 
   try {
     const res = await fetch(`${API_URL}/api/scan`, {
       method: 'POST',
-      headers: { 'content-type': '
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode })
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_id: data.sku_id, inventory_id: data.inventory_id });
+      bumpSkuCount(data.sku_id);
+      setFeedback(`✅ ${barcode} reserved`);
+    } else {
+      state.scans.push({ barcode, ok: false, msg: data.msg || data.code || 'Error' });
+      setFeedback(`❌ ${barcode}: ${data.msg || data.code}`, false);
+    }
+    render();
+  } catch (e) {
+    state.scans.push({ barcode, ok: false, msg: String(e.message || e) });
+    setFeedback(`❌ ${barcode}: ${String(e.message || e)}`, false);
+    render();
+  }
+});
+
+// autofocus for scanners
+window.addEventListener('load', () => $('#scanInput').focus());
