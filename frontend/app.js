@@ -1,25 +1,65 @@
 const $ = (sel) => document.querySelector(sel);
 
-// 🔒 Hardcode your Worker URL here
+// 🔒 Hardcode your Worker URL
 const API_URL = "https://dispatch-api.julsyjuls.workers.dev";
 
-// recent scans
-const list = $('#scanList');
-list.innerHTML = '';
-for (let i = state.scans.length - 1; i >= Math.max(0, state.scans.length - 30); i--) {
-  const s = state.scans[i];
-  const li = document.createElement('li');
-  li.innerHTML = `${s.ok ? '✅' : '❌'} <strong>${s.barcode}</strong> · ${s.msg}`;
-  list.appendChild(li);
+// --- get dispatch_id from URL only ---
+function getDispatchIdFromURL() {
+  const params = new URLSearchParams(location.search);
+  const did = params.get('dispatch_id');
+  const n = Number(did || 0);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// counts
-const counts = $('#skuCounts');
-counts.innerHTML = '';
-for (const [sku, n] of state.skuCounts.entries()) {
-  const li = document.createElement('li');
-  li.textContent = `SKU ${sku}: ${n}`;
-  counts.appendChild(li);
+let DISPATCH_ID = getDispatchIdFromURL();
+
+// Optional: show a badge like “Dispatch #1234”
+(function showBadge() {
+  const badge = $('#dispatchBadge');
+  if (!badge) return;
+  if (DISPATCH_ID) {
+    badge.textContent = `Dispatch #${DISPATCH_ID}`;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.textContent = 'No dispatch selected';
+    badge.style.display = 'inline-block';
+  }
+})();
+
+// Disable UI if opened without a dispatch_id
+(function guardOpenWithoutId() {
+  const scan = $('#scanInput');
+  const finalize = $('#finalizeBtn');
+  if (!DISPATCH_ID) {
+    if (scan) {
+      scan.disabled = true;
+      scan.placeholder = 'Open from Softr dispatch details (missing ?dispatch_id=...)';
+    }
+    if (finalize) finalize.disabled = true;
+    if (typeof setFeedback === 'function') {
+      setFeedback('Missing Dispatch ID. Open this page via Softr dispatch details.', false);
+    }
+  }
+})();
+
+// ------------ render + counts (your existing state helpers) ------------
+function render() {
+  const list = $('#scanList');
+  list.innerHTML = '';
+  for (let i = state.scans.length - 1; i >= Math.max(0, state.scans.length - 30); i--) {
+    const s = state.scans[i];
+    const li = document.createElement('li');
+    li.innerHTML = `${s.ok ? '✅' : '❌'} <strong>${s.barcode}</strong> · ${s.msg}`;
+    list.appendChild(li);
+  }
+
+  const counts = $('#skuCounts');
+  counts.innerHTML = '';
+  for (const [sku, n] of state.skuCounts.entries()) {
+    const li = document.createElement('li');
+    li.textContent = `SKU ${sku}: ${n}`;
+    counts.appendChild(li);
+  }
 }
 
 function bumpSkuCount(sku_id) {
@@ -28,22 +68,17 @@ function bumpSkuCount(sku_id) {
   state.skuCounts.set(sku_id, n + 1);
 }
 
-$('#dispatchId').addEventListener('change', (e) => {
-  state.dispatchId = Number(e.target.value || 0) || null;
-});
-
+// ------------ Finalize (backend reads date from header in Softr) ------------
 $('#finalizeBtn').addEventListener('click', async () => {
-  const id = Number($('#dispatchId').value || 0);
-  const date = $('#dispatchDate').value;
-  if (!id || !date) {
-    setFeedback('Dispatch ID and date required to finalize', false);
+  if (!DISPATCH_ID) {
+    setFeedback('Missing Dispatch ID. Open from Softr dispatch details.', false);
     return;
   }
   try {
     const res = await fetch(`${API_URL}/api/finalize`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dispatch_id: id, dispatch_date: date })
+      body: JSON.stringify({ dispatch_id: DISPATCH_ID }) // no date here
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.msg || data.error || 'Finalize failed');
@@ -53,54 +88,18 @@ $('#finalizeBtn').addEventListener('click', async () => {
   }
 });
 
+// ------------ Scan → Reserve ------------
 $('#scanInput').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
   const barcode = e.target.value.trim();
   e.target.value = '';
 
-  const id = Number($('#dispatchId').value || 0);
-  if (!id) {
-    setFeedback('Enter a Dispatch ID first', false);
+  if (!DISPATCH_ID) {
+    setFeedback('Missing Dispatch ID. Open from Softr dispatch details.', false);
     return;
   }
 
   try {
     const res = await fetch(`${API_URL}/api/scan`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dispatch_id: id, barcode })
-    });
-    const data = await res.json();
-
-    if (data.ok) {
-      state.scans.push({
-        barcode,
-        ok: true,
-        msg: 'Reserved',
-        sku_id: data.sku_id,
-        inventory_id: data.inventory_id
-      });
-      bumpSkuCount(data.sku_id);
-      setFeedback(`✅ ${barcode} reserved`);
-    } else {
-      state.scans.push({
-        barcode,
-        ok: false,
-        msg: data.msg || data.code || 'Error'
-      });
-      setFeedback(`❌ ${barcode}: ${data.msg || data.code}`, false);
-    }
-    render();
-  } catch (e) {
-    state.scans.push({
-      barcode,
-      ok: false,
-      msg: String(e.message || e)
-    });
-    setFeedback(`❌ ${barcode}: ${String(e.message || e)}`, false);
-    render();
-  }
-});
-
-// autofocus helper for scanners
-window.addEventListener('load', () => $('#scanInput').focus());
+      headers: { 'content-type': '
