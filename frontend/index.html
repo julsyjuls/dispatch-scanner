@@ -13,23 +13,17 @@
   </header>
 
   <section class="panel">
-    <div class="grid">
-      <div>
-        <label>Dispatch ID</label>
-        <input id="dispatchId" type="number" placeholder="e.g. 1234" />
-      </div>
-      <div>
-        <label>Dispatch Date</label>
-        <input id="dispatchDate" type="date" />
-      </div>
-    </div>
+    <!-- Optional: show current dispatch for clarity (read-only badge) -->
+    <div id="dispatchBadge" class="badge"></div>
 
-    <button id="finalizeBtn" class="warn">Finalize Dispatch (set Sold + date_out)</button>
+    <button id="finalizeBtn" class="warn">
+      Finalize Dispatch (uses date set in Softr)
+    </button>
   </section>
 
   <section class="panel">
     <label>Scan Barcode</label>
-    <input id="scanInput" type="text" autofocus placeholder="Focus here and scan…" />
+    <input id="scanInput" type="text" autofocus placeholder="Open this page from a Dispatch → then scan…" />
     <div id="feedback" class="feedback"></div>
 
     <div class="columns">
