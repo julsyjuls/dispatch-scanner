@@ -1,58 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Dispatch Scanner</title>
-<link rel="stylesheet" href="./styles.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dispatch Scanner</title>
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-<header>
-<h1>Dispatch Scanner</h1>
-<div class="small">Fast scan → live validate → reserve</div>
-</header>
+  <header>
+    <h1>Dispatch Scanner</h1>
+    <div class="small">Fast scan → live validate → reserve</div>
+  </header>
 
+  <section class="panel">
+    <div class="grid">
+      <div>
+        <label>Dispatch ID</label>
+        <input id="dispatchId" type="number" placeholder="e.g. 1234" />
+      </div>
+      <div>
+        <label>Dispatch Date</label>
+        <input id="dispatchDate" type="date" />
+      </div>
+    </div>
 
-<section class="panel">
-<label>Worker API URL</label>
-<input id="apiUrl" type="text" placeholder="https://dispatch-api.workers.dev" />
+    <button id="finalizeBtn" class="warn">Finalize Dispatch (set Sold + date_out)</button>
+  </section>
 
+  <section class="panel">
+    <label>Scan Barcode</label>
+    <input id="scanInput" type="text" autofocus placeholder="Focus here and scan…" />
+    <div id="feedback" class="feedback"></div>
 
-<div class="grid">
-<div>
-<label>Dispatch ID</label>
-<input id="dispatchId" type="number" placeholder="e.g. 1234" />
-</div>
-<div>
-<label>Dispatch Date</label>
-<input id="dispatchDate" type="date" />
-</div>
-</div>
+    <div class="columns">
+      <div class="col">
+        <h3>Recent Scans</h3>
+        <ul id="scanList"></ul>
+      </div>
+      <div class="col">
+        <h3>Counts by SKU</h3>
+        <ul id="skuCounts"></ul>
+      </div>
+    </div>
+  </section>
 
-
-<button id="finalizeBtn" class="warn">Finalize Dispatch (set Sold + date_out)</button>
-</section>
-
-
-<section class="panel">
-<label>Scan Barcode</label>
-<input id="scanInput" type="text" autofocus placeholder="Focus here and scan…" />
-<div id="feedback" class="feedback"></div>
-
-
-<div class="columns">
-<div class="col">
-<h3>Recent Scans</h3>
-<ul id="scanList"></ul>
-</div>
-<div class="col">
-<h3>Counts by SKU</h3>
-<ul id="skuCounts"></ul>
-</div>
-</div>
-</section>
-
-
-<script src="./app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
