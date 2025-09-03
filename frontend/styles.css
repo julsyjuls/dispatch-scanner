@@ -86,30 +86,6 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
   font-weight: 600;
 }
 
-.barcode-list {
-  list-style: none;
-  padding: 8px 0 0 28px; /* indent under the SKU row */
-  margin: 0;
-}
-
-.barcode-chip {
-  display: flex;              /* full row */
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-  padding: 6px 10px;
-  border: 1px dashed #283343;
-  border-radius: 8px;
-  background: #0f1520;
-  color: #cde1ff;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-}
-.barcode-chip:last-child {
-  margin-bottom: 0;
-}
-
-
 .sku-badge {
   background: #1f2a3a;
   color: #8fe1a2;
@@ -121,3 +97,41 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
   min-width: 20px;
   text-align: center;
 }
+
+.barcode-list {
+  list-style: none;
+  padding: 8px 0 0 28px; /* indent under the SKU row */
+  margin: 0;
+}
+
+.barcode-chip {
+  display: flex;              /* full row, but keep items close */
+  justify-content: flex-start;/* ⬅️ keep Remove near the barcode */
+  align-items: center;
+  gap: 10px;                  /* small gap between code and button */
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border: 1px dashed #283343;
+  border-radius: 8px;
+  background: #0f1520;
+  color: #cde1ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+.barcode-chip:last-child { margin-bottom: 0; }
+
+.barcode-chip .chip-code {
+  font-weight: 600;           /* make the barcode pop a bit */
+}
+
+.barcode-chip .chip-remove {
+  border: 1px solid #52343a;
+  background: #2a1317;
+  color: #e7eef7;
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.barcode-chip .chip-remove:hover { background:#7a1d24; border-color:#7a1d24; }
+.barcode-chip .chip-remove:active { transform: translateY(1px); }
