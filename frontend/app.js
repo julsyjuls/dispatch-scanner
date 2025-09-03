@@ -3,6 +3,9 @@ const $ = (sel) => document.querySelector(sel);
 // 🔒 Your Worker URL
 const API_URL = "https://dispatch-api.julsyjuls.workers.dev";
 
+// Track whether the custom modal is open (so we don't steal focus)
+let modalOpen = false;
+
 // ---------- State & helpers ----------
 const state = {
   scans: [],            // { barcode, ok, msg, sku_code }
@@ -24,6 +27,42 @@ function getDispatchIdFromURL() {
   return /^\d+$/.test(did || '') ? did : null;
 }
 let DISPATCH_ID = getDispatchIdFromURL();
+
+// Custom confirm modal (falls back to window.confirm if modal HTML not present)
+function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
+  const overlay = $('#confirmOverlay');
+  const titleEl = $('#confirmTitle');
+  const msgEl   = $('#confirmMsg');
+  const okBtn   = $('#confirmOk');
+  const cancelBtn = $('#confirmCancel');
+
+  // Fallback to native confirm if modal markup not present
+  if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) {
+    const plain = String(htmlMessage).replace(/<[^>]*>/g, '');
+    return Promise.resolve(window.confirm(plain));
+  }
+
+  return new Promise((resolve) => {
+    titleEl.textContent = 'Remove item?';
+    msgEl.innerHTML = htmlMessage;         // safe: we control content
+    okBtn.textContent = okText;
+    cancelBtn.textContent = cancelText;
+
+    overlay.hidden = false;
+    modalOpen = true;
+
+    const cleanup = (result) => {
+      overlay.hidden = true;
+      modalOpen = false;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      resolve(result);
+    };
+
+    okBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+  });
+}
 
 // Show badge
 (function showBadge() {
@@ -183,7 +222,7 @@ async function unscan(barcode) {
   }
 }
 
-// Event delegation: confirm before removing, then refocus
+// Event delegation: confirm via custom modal before removing, then refocus
 const scanList = $('#scanList');
 if (scanList) {
   scanList.addEventListener('click', async (e) => {
@@ -192,8 +231,12 @@ if (scanList) {
     const code = btn.dataset.barcode;
     if (!code) return;
 
-    const sure = confirm(`Remove ${code} from Dispatch #${DISPATCH_ID}?`);
-    if (!sure) { $('#scanInput')?.focus(); return; }
+    const ok = await confirmModal(
+      `Remove <strong class="code">${code}</strong> from Dispatch #${DISPATCH_ID}?`,
+      'Remove',
+      'Cancel'
+    );
+    if (!ok) { $('#scanInput')?.focus(); return; }
 
     await unscan(code);
     $('#scanInput')?.focus();
@@ -206,7 +249,8 @@ window.addEventListener('load', () => {
   loadExisting();
 });
 
-// Click anywhere → focus the scanner input (keep your behavior)
+// Click anywhere → focus the scanner input (keep your behavior; pause when modal open)
 document.addEventListener('click', (e) => {
+  if (modalOpen) return; // don't steal focus from modal
   if (e.target?.id !== 'scanInput') $('#scanInput')?.focus();
 });
