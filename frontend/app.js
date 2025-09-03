@@ -20,10 +20,11 @@ function setFeedback(msg, success = true) {
 function getDispatchIdFromURL() {
   const params = new URLSearchParams(location.search);
   const did = params.get('dispatch_id');
-  const n = Number(did || 0);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  // accept digits-only, but KEEP leading zeros (return as string)
+  return /^\d+$/.test(did || '') ? did : null;
 }
 let DISPATCH_ID = getDispatchIdFromURL();
+
 
 // Show badge
 (function showBadge() {
