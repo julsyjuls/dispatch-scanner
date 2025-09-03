@@ -81,43 +81,43 @@ $('#scanInput').addEventListener('keydown', async (e) => {
   }
 
   try {
-    const res = await fetch(`${API_URL}/api/scan`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode })
-    });
+  const res = await fetch(`${API_URL}/api/scan`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode })
+  });
 
-    // Handle non-2xx HTTP
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      state.scans.push({ barcode, ok: false, msg: `HTTP ${res.status} ${text}` });
-      setFeedback(`❌ ${barcode}: HTTP ${res.status}`, false);
-      render();
-      return;
-    }
-
-    const data = await res.json();
-
-    // Worker returns { ok, msg, item, rows }
-    const item = data.item || (Array.isArray(data.rows) ? data.rows[0] : null);
-    const sku_code = item?.sku_code;
-
-    if (data.ok) {
-      state.scans.push({ barcode, ok: true, msg: data.msg || 'Reserved', sku_code });
-      bumpSkuCount(sku_code);
-      setFeedback(`✅ ${barcode} reserved${sku_code ? ` · ${sku_code}` : ''}`);
-    } else {
-      const msg = data.msg || data.code || 'Error';
-      state.scans.push({ barcode, ok: false, msg, sku_code });
-      setFeedback(`❌ ${barcode}: ${msg}`, false);
-    }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    state.scans.push({ barcode, ok: false, msg: `HTTP ${res.status} ${text}` });
+    setFeedback(`❌ ${barcode}: HTTP ${res.status}`, false);
     render();
-  } catch (err) {
-    const msg = String(err?.message || err);
-    state.scans.push({ barcode, ok: false, msg });
-    setFeedback(`❌ ${barcode}: ${msg}`, false);
-    render();
+    return;
   }
+
+  const data = await res.json();
+  const item = data.item || (Array.isArray(data.rows) ? data.rows[0] : null);
+  const sku_code = item?.sku_code;
+
+  if (data.ok && item?.was_inserted) {
+    state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code });
+    bumpSkuCount(sku_code);             // ✅ only on first insert
+    setFeedback(`✅ ${barcode} reserved${sku_code ? ` · ${sku_code}` : ''}`);
+  } else {
+    const msg = data.msg || (item
+      ? `Not eligible: ${item.inventory_status} (rank ${item.batch_rank})`
+      : (data.code || 'Error'));
+    state.scans.push({ barcode, ok: false, msg, sku_code });
+    setFeedback(`❌ ${barcode}: ${msg}`, false);
+  }
+  render();
+} catch (err) {
+  const msg = String(err?.message || err);
+  state.scans.push({ barcode, ok: false, msg });
+  setFeedback(`❌ ${barcode}: ${msg}`, false);
+  render();
+}
+
 });
 
 // autofocus for scanners
