@@ -93,9 +93,9 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
 }
 
 .barcode-chip {
-  display: inline-flex;
+  display: flex;              /* full row */
+  justify-content: space-between;
   align-items: center;
-  gap: 10px;
   margin-bottom: 6px;
   padding: 6px 10px;
   border: 1px dashed #283343;
@@ -105,26 +105,9 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
 }
-
 .barcode-chip:last-child {
   margin-bottom: 0;
 }
-
-.barcode-chip .chip-code {
-  flex-grow: 0;
-}
-
-.barcode-chip .chip-remove {
-  border: 1px solid #52343a;
-  background: #2a1317;
-  color: #e7eef7;
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-size: 12px;
-}
-.barcode-chip .chip-remove:hover { background:#7a1d24; border-color:#7a1d24; }
-.barcode-chip .chip-remove:active { transform: translateY(1px); }
 
 
 .sku-badge {
