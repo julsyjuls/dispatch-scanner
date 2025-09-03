@@ -126,6 +126,7 @@ if (scanInput) {
         state.scans.push({ barcode, ok: false, msg: `HTTP ${res.status} ${text}` });
         setFeedback(`❌ ${barcode}: HTTP ${res.status}`, false);
         render();
+        $('#scanInput')?.focus();
         return;
       }
 
@@ -145,11 +146,13 @@ if (scanInput) {
         setFeedback(`❌ ${barcode}: ${msg}`, false);
       }
       render();
+      $('#scanInput')?.focus(); // refocus after handling
     } catch (err) {
       const msg = String(err?.message || err);
       state.scans.push({ barcode, ok: false, msg });
       setFeedback(`❌ ${barcode}: ${msg}`, false);
       render();
+      $('#scanInput')?.focus();
     }
   });
 }
@@ -173,19 +176,27 @@ async function unscan(barcode) {
     }
     setFeedback(`↩️ ${barcode}: ${data.msg}`, true);
     await loadExisting(); // re-hydrate list & counts from DB
+    $('#scanInput')?.focus(); // refocus after unscan
   } catch (e) {
     setFeedback(`❌ ${barcode}: ${String(e.message || e)}`, false);
+    $('#scanInput')?.focus();
   }
 }
 
-// Event delegation: handle clicks on any "Remove" button inside the list
+// Event delegation: confirm before removing, then refocus
 const scanList = $('#scanList');
 if (scanList) {
-  scanList.addEventListener('click', (e) => {
+  scanList.addEventListener('click', async (e) => {
     const btn = e.target.closest('button.remove');
     if (!btn) return;
     const code = btn.dataset.barcode;
-    if (code) unscan(code);
+    if (!code) return;
+
+    const sure = confirm(`Remove ${code} from Dispatch #${DISPATCH_ID}?`);
+    if (!sure) { $('#scanInput')?.focus(); return; }
+
+    await unscan(code);
+    $('#scanInput')?.focus();
   });
 }
 
@@ -195,7 +206,7 @@ window.addEventListener('load', () => {
   loadExisting();
 });
 
-// Click anywhere → focus the scanner input
+// Click anywhere → focus the scanner input (keep your behavior)
 document.addEventListener('click', (e) => {
   if (e.target?.id !== 'scanInput') $('#scanInput')?.focus();
 });
