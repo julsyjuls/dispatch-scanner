@@ -86,34 +86,34 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
 
 .barcode-list {
   list-style: none;
-  padding: 8px 0 0 28px;  /* indent under the row */
+  padding: 8px 0 0 28px; /* indent under the SKU row */
   margin: 0;
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px;
 }
 
 .barcode-chip {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  padding: 6px 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 6px 10px;
   border: 1px dashed #283343;
   border-radius: 8px;
   background: #0f1520;
   color: #cde1ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.barcode-chip:last-child {
+  margin-bottom: 0;
 }
 
 .barcode-chip .chip-code {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-grow: 1;
 }
 
 .barcode-chip .chip-remove {
+  margin-left: 12px;
   border: 1px solid #52343a;
   background: #2a1317;
   color: #e7eef7;
