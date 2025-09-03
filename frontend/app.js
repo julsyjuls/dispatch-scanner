@@ -1,164 +1,159 @@
-const $ = (sel) => document.querySelector(sel);
+// --- Helpers ---
+const json = (obj, init = {}) =>
+  new Response(JSON.stringify(obj), {
+    headers: { "content-type": "application/json" },
+    ...init,
+  });
 
-// 🔒 Your Worker URL
-const API_URL = "https://dispatch-api.julsyjuls.workers.dev";
-
-// ---------- State & helpers ----------
-const state = {
-  scans: [],            // { barcode, ok, msg, sku_code }
-  skuCounts: new Map(), // key: sku_code, val: count
-};
-
-function setFeedback(msg, success = true) {
-  const el = $('#feedback');
-  if (!el) return;
-  el.textContent = msg || '';
-  el.classList.toggle('success', !!success);
-  el.classList.toggle('error', !success);
+function withCors(req, res, origin) {
+  const o = origin || req.headers.get("Origin") || "*";
+  const headers = new Headers(res.headers);
+  headers.set("Access-Control-Allow-Origin", o);
+  headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "content-type,authorization");
+  return new Response(res.body, { status: res.status, headers });
 }
 
-function getDispatchIdFromURL() {
-  const params = new URLSearchParams(location.search);
-  const did = params.get('dispatch_id');
-  // keep digits and preserve leading zeros; return as string
-  return /^\d+$/.test(did || '') ? did : null;
-}
-let DISPATCH_ID = getDispatchIdFromURL();
-
-// badge
-(function showBadge() {
-  const badge = $('#dispatchBadge');
-  if (!badge) return;
-  if (DISPATCH_ID) {
-    badge.textContent = `Dispatch #${DISPATCH_ID}`;
-  } else {
-    badge.textContent = 'No dispatch selected — open this from Softr';
+async function callRpc(env, fn, body) {
+  const url = `${env.SUPABASE_URL}/rest/v1/rpc/${fn}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`RPC ${fn} failed: ${r.status} ${text}`);
   }
-  badge.style.display = 'inline-block';
-})();
-
-function render() {
-  // recent scans (last 30)
-  const list = $('#scanList');
-  if (list) {
-    list.innerHTML = '';
-    for (let i = state.scans.length - 1; i >= Math.max(0, state.scans.length - 30); i--) {
-      const s = state.scans[i];
-      const li = document.createElement('li');
-      li.innerHTML = `${s.ok ? '✅' : '❌'} <strong>${s.barcode}</strong>` +
-        (s.sku_code ? ` · ${s.sku_code}` : '') +
-        (s.msg ? ` · ${s.msg}` : '');
-      list.appendChild(li);
-    }
-  }
-
-  // counts
-  const counts = $('#skuCounts');
-  if (counts) {
-    counts.innerHTML = '';
-    for (const [sku, n] of state.skuCounts.entries()) {
-      const li = document.createElement('li');
-      li.textContent = `SKU ${sku}: ${n}`;
-      counts.appendChild(li);
-    }
-  }
+  return r.json();
 }
 
-function bumpSkuCount(key) {
-  if (!key) return;
-  const n = state.skuCounts.get(key) || 0;
-  state.skuCounts.set(key, n + 1);
+async function safeJson(req) {
+  try { return await req.json(); } catch { return {}; }
 }
 
-// ---------- Hydrate from server ----------
-async function loadExisting() {
-  if (!DISPATCH_ID) {
-    setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false);
-    return;
-  }
-  try {
-    const res = await fetch(`${API_URL}/api/list?dispatch_id=${encodeURIComponent(DISPATCH_ID)}`);
-    if (!res.ok) {
-      setFeedback(`Couldn't load existing scans (HTTP ${res.status})`, false);
-      return;
-    }
-    const data = await res.json();
-    const rows = data.rows || [];
+// --- Worker ---
+export default {
+  async fetch(req, env) {
+    const url = new URL(req.url);
 
-    // rebuild state
-    state.scans = [];
-    state.skuCounts.clear();
-    for (const r of rows) {
-      state.scans.push({ barcode: r.barcode, ok: true, msg: 'Reserved', sku_code: r.sku_code });
-      bumpSkuCount(r.sku_code);
-    }
-    render();
-  } catch (e) {
-    setFeedback(`Load failed: ${String(e.message || e)}`, false);
-  }
-}
-
-// ---------- Scan handler ----------
-const scanInput = $('#scanInput');
-if (scanInput) {
-  scanInput.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter') return;
-    const barcode = e.target.value.trim();
-    e.target.value = '';
-    if (!barcode) return;
-
-    if (!DISPATCH_ID) {
-      setFeedback('Missing Dispatch ID. Open this page via Softr dispatch details.', false);
-      return;
+    // CORS preflight
+    if (req.method === "OPTIONS") {
+      return withCors(req, new Response(null, { status: 204 }), env.CORS_ORIGIN);
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/scan`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode })
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        state.scans.push({ barcode, ok: false, msg: `HTTP ${res.status} ${text}` });
-        setFeedback(`❌ ${barcode}: HTTP ${res.status}`, false);
-        render();
-        return;
+      // Health check
+      if (url.pathname === "/api/ping") {
+        return withCors(req, json({ ok: true, msg: "Dispatch Worker ready" }), env.CORS_ORIGIN);
       }
 
-      const data = await res.json();
-      const item = data.item || (Array.isArray(data.rows) ? data.rows[0] : null);
-      const sku_code = item?.sku_code;
+      // POST /api/scan
+      if (url.pathname === "/api/scan" && req.method === "POST") {
+        const { dispatch_id, barcode } = await safeJson(req);
+        if (!dispatch_id || !barcode) {
+          return withCors(
+            req,
+            json({ ok: false, code: "BAD_REQUEST", msg: "dispatch_id and barcode required" }, { status: 400 }),
+            env.CORS_ORIGIN
+          );
+        }
 
-      if (data.ok && item?.was_inserted) {
-        state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code });
-        bumpSkuCount(sku_code); // only on first insert
-        setFeedback(`✅ ${barcode} reserved${sku_code ? ` · ${sku_code}` : ''}`);
-      } else {
-        const msg = data.msg || (item
-          ? `Not eligible: ${item.inventory_status} (rank ${item.batch_rank})`
-          : (data.code || 'Error'));
-        state.scans.push({ barcode, ok: false, msg, sku_code });
-        setFeedback(`❌ ${barcode}: ${msg}`, false);
+        const data = await callRpc(env, "scan_dispatch_item", {
+          p_dispatch_id: dispatch_id, // keep as string (e.g., '0000002')
+          p_barcode: barcode,
+        });
+
+        const rows = Array.isArray(data) ? data : [data];
+        if (!rows.length) {
+          return withCors(
+            req,
+            json({ ok: false, code: "NOT_FOUND", msg: "No row returned" }, { status: 404 }),
+            env.CORS_ORIGIN
+          );
+        }
+
+        const item = rows[0];
+        const ok = !!item?.was_inserted;
+        const msg = ok
+          ? "Reserved"
+          : `Not eligible: ${item?.inventory_status ?? "N/A"} (rank ${item?.batch_rank ?? "N/A"})`;
+
+        return withCors(req, json({ ok, msg, item, rows }), env.CORS_ORIGIN);
       }
-      render();
-    } catch (err) {
-      const msg = String(err?.message || err);
-      state.scans.push({ barcode, ok: false, msg });
-      setFeedback(`❌ ${barcode}: ${msg}`, false);
-      render();
+
+      // POST /api/unscan
+      if (url.pathname === "/api/unscan" && req.method === "POST") {
+        const { dispatch_id, barcode } = await safeJson(req);
+        if (!dispatch_id || !barcode) {
+          return withCors(
+            req,
+            json({ ok: false, code: "BAD_REQUEST", msg: "dispatch_id and barcode required" }, { status: 400 }),
+            env.CORS_ORIGIN
+          );
+        }
+
+        const data = await callRpc(env, "unscan_dispatch_item", {
+          p_dispatch_id: dispatch_id,
+          p_barcode: barcode,
+        });
+
+        const rows = Array.isArray(data) ? data : [data];
+        const item = rows[0] || null;
+        const ok = !!item?.removed;
+        const msg = ok
+          ? (item?.reverted ? "Removed and reverted to Available" : "Removed")
+          : "Nothing to remove";
+
+        return withCors(req, json({ ok, msg, item, rows }), env.CORS_ORIGIN);
+      }
+
+      // GET /api/list?dispatch_id=0000002
+      if (url.pathname === "/api/list" && req.method === "GET") {
+        const did = url.searchParams.get("dispatch_id");
+        if (!did) {
+          return withCors(
+            req,
+            json({ ok: false, code: "BAD_REQUEST", msg: "dispatch_id required" }, { status: 400 }),
+            env.CORS_ORIGIN
+          );
+        }
+
+        const rows = await callRpc(env, "list_dispatch_scans", { p_dispatch_id: did });
+        return withCors(req, json({ ok: true, rows }), env.CORS_ORIGIN);
+      }
+
+      // POST /api/finalize
+      if (url.pathname === "/api/finalize" && req.method === "POST") {
+        const { dispatch_id, dispatch_date } = await safeJson(req);
+        if (!dispatch_id || !dispatch_date) {
+          return withCors(
+            req,
+            json({ ok: false, code: "BAD_REQUEST", msg: "dispatch_id and dispatch_date required" }, { status: 400 }),
+            env.CORS_ORIGIN
+          );
+        }
+
+        const result = await callRpc(env, "finalize_dispatch", {
+          p_dispatch_id: dispatch_id,
+          p_dispatch_date: dispatch_date,
+        });
+
+        return withCors(req, json({ ok: true, msg: "Finalize complete", data: result }), env.CORS_ORIGIN);
+      }
+
+      // Default
+      return withCors(req, json({ ok: true, msg: "Dispatch Worker ready" }), env.CORS_ORIGIN);
+    } catch (e) {
+      return withCors(
+        req,
+        json({ ok: false, code: "SERVER_ERROR", error: String(e && e.message ? e.message : e) }, { status: 500 }),
+        env.CORS_ORIGIN
+      );
     }
-  });
-}
-
-// ---------- Focus & boot ----------
-window.addEventListener('load', () => {
-  $('#scanInput')?.focus();
-  loadExisting();
-});
-
-// Click anywhere → focus the scanner input
-document.addEventListener('click', (e) => {
-  if (e.target?.id !== 'scanInput') $('#scanInput')?.focus();
-});
+  },
+};
