@@ -118,7 +118,35 @@ $('#scanInput').addEventListener('keydown', async (e) => {
   render();
 }
 
+  async function loadExisting() {
+  if (!DISPATCH_ID) return;
+  try {
+    const res = await fetch(`${API_URL}/api/list?dispatch_id=${encodeURIComponent(DISPATCH_ID)}`);
+    if (!res.ok) {
+      setFeedback(`Couldn't load existing scans (HTTP ${res.status})`, false);
+      return;
+    }
+    const data = await res.json();
+    const rows = data.rows || [];
+    // reset and rebuild
+    state.scans = [];
+    state.skuCounts.clear();
+    for (const r of rows) {
+      state.scans.push({ barcode: r.barcode, ok: true, msg: 'Reserved', sku_code: r.sku_code });
+      bumpSkuCount(r.sku_code);
+    }
+    render();
+  } catch (e) {
+    setFeedback(`Load failed: ${String(e.message || e)}`, false);
+  }
+}
+
+// on load: focus + fetch existing
+window.addEventListener('load', () => {
+  $('#scanInput')?.focus();
+  loadExisting();
 });
+
 
 // autofocus for scanners
 window.addEventListener('load', () => $('#scanInput')?.focus());
