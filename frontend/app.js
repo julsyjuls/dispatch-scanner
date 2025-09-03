@@ -99,7 +99,7 @@ function render() {
     counts.innerHTML = '';
     for (const [sku, n] of state.skuCounts.entries()) {
       const li = document.createElement('li');
-      li.textContent = `SKU ${sku}: ${n}`;
+      li.textContent = `${sku}: ${n}`;
       counts.appendChild(li);
     }
   }
