@@ -125,3 +125,22 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
 .barcode-chip .chip-remove:hover { background:#7a1d24; border-color:#7a1d24; }
 .barcode-chip .chip-remove:active { transform: translateY(1px); }
 
+.sku-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sku-badge {
+  background: #1f2a3a;
+  color: #8fe1a2;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  line-height: 1.4;
+  min-width: 20px;
+  text-align: center;
+}
+
+
