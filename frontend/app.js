@@ -138,7 +138,7 @@ function render() {
 
       const label = document.createElement('span');
       label.className = 'sku-label';
-      label.textContent = `${sku}: ${n}`;
+      label.innerHTML = `${sku} <span class="sku-badge">${n}</span>`;
 
       li.appendChild(toggle);
       li.appendChild(label);
