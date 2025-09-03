@@ -33,3 +33,35 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
 .success { color:#8fe1a2; }
 .error { color:#ff9b9b; }
 .feedback { margin-top:8px; min-height: 22px; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+}
+.modal {
+  background:#0e1622;
+  border:1px solid #223047;
+  border-radius:14px;
+  padding:20px;
+  width:min(520px, calc(100% - 32px));
+  box-shadow: 0 20px 60px rgba(0,0,0,.6);
+}
+.modal h2 { margin:0 0 8px; font-size:24px; }
+.modal p  { margin:0 0 16px; color:#c8d6e5; font-size:18px; }
+.modal .code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background:#0f1520;
+  border:1px solid #283343;
+  padding:2px 6px; border-radius:6px; color:#e7eef7;
+}
+.modal-actions { display:flex; justify-content:flex-end; gap:10px; }
+
+/* Make Remove button more visible + spaced (you likely added earlier) */
+button.warn { border-color:#7f1d1d; background:#b91c1c; color:#fff; }
+button.warn:hover { background:#dc2626; }
+button.remove { margin-left:14px; vertical-align:middle; }
