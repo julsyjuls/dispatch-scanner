@@ -57,3 +57,71 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
   padding:2px 6px; border-radius:6px; color:#e7eef7;
 }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; }
+
+/* Summary expandable list */
+.sku-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #223047;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: #0e1622;
+}
+
+.sku-row .toggle {
+  border: 1px solid #2a384a;
+  background: #162133;
+  color: #e7eef7;
+  border-radius: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.sku-row .sku-label {
+  font-weight: 600;
+}
+
+.barcode-list {
+  list-style: none;
+  padding: 8px 0 0 28px;  /* indent under the row */
+  margin: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.barcode-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px dashed #283343;
+  border-radius: 8px;
+  background: #0f1520;
+  color: #cde1ff;
+}
+
+.barcode-chip .chip-code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barcode-chip .chip-remove {
+  border: 1px solid #52343a;
+  background: #2a1317;
+  color: #e7eef7;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.barcode-chip .chip-remove:hover { background:#7a1d24; border-color:#7a1d24; }
+.barcode-chip .chip-remove:active { transform: translateY(1px); }
+
