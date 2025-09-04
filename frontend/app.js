@@ -12,7 +12,8 @@ const state = {
   skuCounts: new Map(),      // key: sku_code, val: count
   skuItems: new Map(),       // key: sku_code, val: Set(barcodes)
   expandedSKUs: new Set(),   // which SKUs are expanded in the UI
-  brandBySku: new Map(),     // track brand per SKU
+  brandBySku: new Map(),     // brand per SKU (fallback)
+  brandByBarcode: new Map(), // ✅ brand per barcode (supports mixed brands)
 };
 
 function setFeedback(msg, success = true) {
@@ -138,10 +139,18 @@ function render() {
       toggle.className = 'toggle';
       toggle.textContent = state.expandedSKUs.has(sku) ? '▼' : '▶';
 
-      const brand = state.brandBySku.get(sku) ?? '';
+      // Compute brand label: if multiple brands under this SKU => "Mixed"
+      const set = state.skuItems.get(sku) || new Set();
+      const brandSet = new Set();
+      for (const code of set) {
+        const b = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
+        if (b) brandSet.add(b);
+      }
+      const brandLabel = brandSet.size > 1 ? 'Mixed' : (brandSet.values().next().value || '');
+
       const label = document.createElement('span');
       label.className = 'sku-label';
-      label.innerHTML = `${sku} ${brand ? `· <em>${brand}</em>` : ''} <span class="sku-badge">${n}</span>`;
+      label.innerHTML = `${sku} ${brandLabel ? `· <em>${brandLabel}</em>` : ''} <span class="sku-badge">${n}</span>`;
 
       li.appendChild(toggle);
       li.appendChild(label);
@@ -151,24 +160,30 @@ function render() {
         const ul = document.createElement('ul');
         ul.className = 'barcode-list';
 
-        const set = state.skuItems.get(sku) || new Set();
         for (const code of Array.from(set).sort()) {
           const item = document.createElement('li');
           item.className = 'barcode-chip';
 
+          const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
+
           const codeSpan = document.createElement('span');
           codeSpan.className = 'chip-code';
-          codeSpan.textContent = code;
-
+          codeSpan.textContent = brand ? `${code} · ${brand}` : code;
+          
           const rm = document.createElement('button');
           rm.type = 'button';
           rm.className = 'chip-remove';
           rm.textContent = 'Remove';
           rm.dataset.barcode = code;
           rm.dataset.sku = sku;
-
+          
+          item.style.display = "flex";
+          item.style.justifyContent = "space-between";
+          item.style.alignItems = "center";
+          
           item.appendChild(codeSpan);
           item.appendChild(rm);
+
           ul.appendChild(item);
         }
         li.appendChild(ul);
@@ -200,6 +215,7 @@ async function loadExisting() {
     state.skuItems.clear();
     // keep expandedSKUs as-is so the UI doesn't collapse on refresh
     state.brandBySku.clear();
+    state.brandByBarcode.clear();
 
     for (const r of rows) {
       state.scans.push({ barcode: r.barcode, ok: true, msg: 'Reserved', sku_code: r.sku_code });
@@ -208,7 +224,10 @@ async function loadExisting() {
 
       // keep brand if backend returns it (brand_name / brand)
       const brand = r.brand_name ?? r.brand ?? null;
-      if (brand) state.brandBySku.set(r.sku_code, brand);
+      if (brand) {
+        state.brandBySku.set(r.sku_code, brand);
+        state.brandByBarcode.set(r.barcode, brand);
+      }
     }
     render();
   } catch (e) {
@@ -255,14 +274,20 @@ if (scanInput) {
         state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code });
         bumpSkuCount(sku_code);        // only on first insert
         addSkuItem(sku_code, barcode); // track barcode under its SKU
-        if (brand_name) state.brandBySku.set(sku_code, brand_name);
+        if (brand_name) {
+          state.brandBySku.set(sku_code, brand_name);
+          state.brandByBarcode.set(barcode, brand_name);
+        }
         setFeedback(`✅ ${barcode} reserved${sku_code ? ` · ${sku_code}` : ''}`);
       } else {
         const msg = data.msg || (item
           ? `Not eligible: ${item.inventory_status} (rank ${item.batch_rank})`
           : (data.code || 'Error'));
         state.scans.push({ barcode, ok: false, msg, sku_code });
-        if (brand_name) state.brandBySku.set(sku_code, brand_name);
+        if (brand_name) {
+          state.brandBySku.set(sku_code, brand_name);
+          state.brandByBarcode.set(barcode, brand_name);
+        }
         setFeedback(`❌ ${barcode}: ${msg}`, false);
       }
       render();
@@ -378,8 +403,8 @@ document.addEventListener('click', (e) => {
 function buildDetailsFromState() {
   const out = [];
   for (const [sku, set] of state.skuItems.entries()) {
-    const brand = state.brandBySku.get(sku) ?? "";
     for (const code of set) {
+      const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? "";
       out.push({ sku_code: sku, barcode: code, brand_name: brand });
     }
   }
@@ -389,11 +414,24 @@ function buildDetailsFromState() {
 }
 
 function buildSummaryFromState() {
-  const rows = [];
-  for (const [sku, count] of state.skuCounts.entries()) {
-    rows.push({ sku_code: sku, brand_name: state.brandBySku.get(sku) ?? "", count });
+  // Count by composite key (sku|brand) so mixed brands split rows
+  const byKey = new Map();
+  for (const [sku, set] of state.skuItems.entries()) {
+    for (const code of set) {
+      const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? "";
+      const key = `${sku}||${brand}`;
+      byKey.set(key, (byKey.get(key) || 0) + 1);
+    }
   }
-  rows.sort((a, b) => a.sku_code.localeCompare(b.sku_code));
+  const rows = [];
+  for (const [key, count] of byKey.entries()) {
+    const [sku, brand] = key.split("||");
+    rows.push({ sku_code: sku, brand_name: brand, count });
+  }
+  rows.sort((a, b) =>
+    a.sku_code.localeCompare(b.sku_code) ||
+    (a.brand_name ?? "").localeCompare(b.brand_name ?? "")
+  );
   return rows;
 }
 
@@ -442,7 +480,6 @@ function appendTotalsRow(ws, label, countColLetter) {
   const newRange = { s: range.s, e: { r: nextRowNumber - 1, c: range.e.c } };
   ws['!ref'] = XLSX.utils.encode_range(newRange);
 }
-
 
 // ===== XLSX Export (Summary + Details) =====
 function exportXlsx() {
