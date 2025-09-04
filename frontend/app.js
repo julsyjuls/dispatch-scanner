@@ -13,7 +13,7 @@ const state = {
   skuItems: new Map(),       // key: sku_code, val: Set(barcodes)
   expandedSKUs: new Set(),   // which SKUs are expanded in the UI
   brandBySku: new Map(),     // brand per SKU (fallback)
-  brandByBarcode: new Map(), // ✅ brand per barcode (supports mixed brands)
+  brandByBarcode: new Map(), // brand per barcode (supports mixed brands)
 };
 
 function setFeedback(msg, success = true) {
@@ -38,7 +38,7 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const titleEl = $('#confirmTitle');
   const msgEl   = $('#confirmMsg');
   const okBtn   = $('#confirmOk');
-  const cancelBtn = $('#confirmCancel');
+  const cancelBtn = $('#confirmCancel']);
 
   // Fallback to native confirm if modal markup not present
   if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) {
@@ -169,18 +169,19 @@ function render() {
           const codeSpan = document.createElement('span');
           codeSpan.className = 'chip-code';
           codeSpan.textContent = brand ? `${code} · ${brand}` : code;
-          
+
           const rm = document.createElement('button');
           rm.type = 'button';
           rm.className = 'chip-remove';
           rm.textContent = 'Remove';
           rm.dataset.barcode = code;
           rm.dataset.sku = sku;
-          
-          item.style.display = "flex";
-          item.style.justifyContent = "space-between";
+
+          // Put Remove RIGHT AFTER the barcode+brand (not at far right)
+          item.style.display = "inline-flex";
           item.style.alignItems = "center";
-          
+          item.style.gap = "8px";
+
           item.appendChild(codeSpan);
           item.appendChild(rm);
 
