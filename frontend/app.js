@@ -38,7 +38,7 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const titleEl = $('#confirmTitle');
   const msgEl   = $('#confirmMsg');
   const okBtn   = $('#confirmOk');
-  const cancelBtn = $('#confirmCancel'];
+  const cancelBtn = $('#confirmCancel');
 
   // Fallback to native confirm if modal markup not present
   if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) {
