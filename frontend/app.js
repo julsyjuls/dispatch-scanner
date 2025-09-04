@@ -156,39 +156,42 @@ function render() {
       li.appendChild(label);
 
       // If expanded, render the child list of barcodes with their own Remove buttons
-      if (state.expandedSKUs.has(sku)) {
-        const ul = document.createElement('ul');
-        ul.className = 'barcode-list';
-
-        for (const code of Array.from(set).sort()) {
-          const item = document.createElement('li');
-          item.className = 'barcode-chip';
-
-          const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
-
-          const codeSpan = document.createElement('span');
-          codeSpan.className = 'chip-code';
-          codeSpan.textContent = brand ? `${code} · ${brand}` : code;
-
-          const rm = document.createElement('button');
-          rm.type = 'button';
-          rm.className = 'chip-remove';
-          rm.textContent = 'Remove';
-          rm.dataset.barcode = code;
-          rm.dataset.sku = sku;
-
-          // Put Remove RIGHT AFTER the barcode+brand (not at far right)
-          item.style.display = "inline-flex";
-          item.style.alignItems = "center";
-          item.style.gap = "8px";
-
-          item.appendChild(codeSpan);
-          item.appendChild(rm);
-
-          ul.appendChild(item);
-        }
-        li.appendChild(ul);
+    if (state.expandedSKUs.has(sku)) {
+      const ul = document.createElement('ul');
+      ul.className = 'barcode-list';
+      // stack items vertically: 1 per row
+      ul.style.display = 'flex';
+      ul.style.flexDirection = 'column';
+      ul.style.gap = '8px';
+    
+      for (const code of Array.from(set).sort()) {
+        const item = document.createElement('li');
+        item.className = 'barcode-chip';
+        // block-level flex so each chip is its own row
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.gap = '8px';
+    
+        const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
+        const codeSpan = document.createElement('span');
+        codeSpan.className = 'chip-code';
+        codeSpan.textContent = brand ? `${code} · ${brand}` : code;
+    
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'chip-remove';
+        rm.textContent = 'Remove';
+        rm.dataset.barcode = code;
+        rm.dataset.sku = sku;
+    
+        // Remove sits immediately after barcode · brand
+        item.appendChild(codeSpan);
+        item.appendChild(rm);
+    
+        ul.appendChild(item);
       }
+      li.appendChild(ul);
+    }
 
       counts.appendChild(li);
     }
