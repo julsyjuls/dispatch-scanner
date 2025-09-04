@@ -16,9 +16,17 @@
     <div id="dispatchBadge" class="badge"></div>
   </section>
 
+<div class="panel" style="padding:14px; border-bottom:1px solid #1b2430; display:flex; justify-content:flex-end;">
+  <button id="btnExportXlsx">⬇️ Export </button>
+</div>
+
+<!-- SheetJS (needed for XLSX export) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  
   <section class="panel">
     <label>Scan Barcode</label>
-    <input id="scanInput" type="text" autofocus placeholder="Click here and scan." />
+    <input id="scanInput" type="text" autofocus placeholder="Scan or enter barcode." />
     <div id="feedback" class="feedback"></div>
 
     <div class="columns">
