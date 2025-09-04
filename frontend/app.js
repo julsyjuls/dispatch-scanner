@@ -38,7 +38,7 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const titleEl = $('#confirmTitle');
   const msgEl   = $('#confirmMsg');
   const okBtn   = $('#confirmOk');
-  const cancelBtn = $('#confirmCancel');
+  const cancelBtn = $('#confirmCancel'];
 
   // Fallback to native confirm if modal markup not present
   if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) {
@@ -156,42 +156,42 @@ function render() {
       li.appendChild(label);
 
       // If expanded, render the child list of barcodes with their own Remove buttons
-    if (state.expandedSKUs.has(sku)) {
-      const ul = document.createElement('ul');
-      ul.className = 'barcode-list';
-      // stack items vertically: 1 per row
-      ul.style.display = 'flex';
-      ul.style.flexDirection = 'column';
-      ul.style.gap = '8px';
-    
-      for (const code of Array.from(set).sort()) {
-        const item = document.createElement('li');
-        item.className = 'barcode-chip';
-        // block-level flex so each chip is its own row
-        item.style.display = 'flex';
-        item.style.alignItems = 'center';
-        item.style.gap = '8px';
-    
-        const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
-        const codeSpan = document.createElement('span');
-        codeSpan.className = 'chip-code';
-        codeSpan.textContent = brand ? `${code} · ${brand}` : code;
-    
-        const rm = document.createElement('button');
-        rm.type = 'button';
-        rm.className = 'chip-remove';
-        rm.textContent = 'Remove';
-        rm.dataset.barcode = code;
-        rm.dataset.sku = sku;
-    
-        // Remove sits immediately after barcode · brand
-        item.appendChild(codeSpan);
-        item.appendChild(rm);
-    
-        ul.appendChild(item);
+      if (state.expandedSKUs.has(sku)) {
+        const ul = document.createElement('ul');
+        ul.className = 'barcode-list';
+        // stack items vertically: 1 per row
+        ul.style.display = 'flex';
+        ul.style.flexDirection = 'column';
+        ul.style.gap = '8px';
+
+        for (const code of Array.from(set).sort()) {
+          const item = document.createElement('li');
+          item.className = 'barcode-chip';
+          // block-level flex so each chip is its own row
+          item.style.display = 'flex';
+          item.style.alignItems = 'center';
+          item.style.gap = '8px';
+
+          const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
+          const codeSpan = document.createElement('span');
+          codeSpan.className = 'chip-code';
+          codeSpan.textContent = brand ? `${code} · ${brand}` : code;
+
+          const rm = document.createElement('button');
+          rm.type = 'button';
+          rm.className = 'chip-remove';
+          rm.textContent = 'Remove';
+          rm.dataset.barcode = code;
+          rm.dataset.sku = sku;
+
+          // Remove sits immediately after barcode · brand
+          item.appendChild(codeSpan);
+          item.appendChild(rm);
+
+          ul.appendChild(item);
+        }
+        li.appendChild(ul);
       }
-      li.appendChild(ul);
-    }
 
       counts.appendChild(li);
     }
@@ -468,16 +468,15 @@ function addAutoFilter(ws, headerOrder) {
   ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: range.e.r, c: range.e.c } }) };
 }
 
-function appendTotalsRow(ws, label, countColLetter) {
+// ✅ UPDATED: write value + formula so it's never blank
+function appendTotalsRow(ws, label, countColLetter, totalValue) {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
   const nextRowNumber = range.e.r + 2; // 1-based index of the next empty row
 
-  // Write: [ "Total", null, =SUM(C2:C{lastDataRow}) ]
-  const lastDataRow = nextRowNumber - 1;
-  const sumFormula = `SUM(${countColLetter}2:${countColLetter}${lastDataRow})`;
+  const sumFormula = `SUM(${countColLetter}2:${countColLetter}${nextRowNumber - 1})`;
   XLSX.utils.sheet_add_aoa(ws, [
-    [label, null, { f: sumFormula }]
+    [label, null, { t: 'n', v: Number(totalValue) || 0, f: sumFormula }]
   ], { origin: `A${nextRowNumber}` });
 
   // Expand sheet range to include the new totals row
@@ -503,9 +502,16 @@ function exportXlsx() {
   const wsSummary = XLSX.utils.json_to_sheet(summary, { header: summaryHeaders });
   wsSummary['!cols'] = autosizeColumnsFromJSON(summary, summaryHeaders);
   addAutoFilter(wsSummary, summaryHeaders);
-  // Totals row (puts "Total" at col A and SUM in column C)
-  appendTotalsRow(wsSummary, "Total", "C");
+
+  // ✅ compute and write a real value for Total (and keep the formula)
+  const totalCount = summary.reduce((s, r) => s + Number(r.count || 0), 0);
+  appendTotalsRow(wsSummary, "Total", "C", totalCount);
+
   XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+  // (optional but helpful) force Excel to recalc on open
+  wb.Workbook = wb.Workbook || {};
+  wb.Workbook.CalcPr = { fullCalcOnLoad: true };
 
   // Details sheet
   const detailHeaders = ["sku_code", "barcode", "brand_name"];
