@@ -25,21 +25,25 @@
 
   
   <section class="panel">
-    <label>Scan Barcode</label>
-    <input id="scanInput" type="text" autofocus placeholder="Scan or enter barcode." />
-    <div id="feedback" class="feedback"></div>
+  <label>Scan Barcode</label>
+  <input id="scanInput" type="text" autofocus placeholder="Scan or enter barcode." />
+  <div id="feedback" class="feedback"></div>
 
-    <div class="columns">
-      <div class="col">
-        <h3>Recent Scans</h3>
-        <ul id="scanList"></ul>
-      </div>
-      <div class="col">
-        <h3>Summary</h3>
-        <ul id="skuCounts"></ul>
-      </div>
+  <div class="columns">
+    <div class="col">
+      <h3>Recent Scans</h3>
+      <ul id="scanList"></ul>
     </div>
-  </section>
+    <div class="col">
+      <!-- ⬇️ changed this line -->
+      <h3 id="summaryHeading">
+        Summary <span id="summaryTotal" class="sku-badge" style="display:none;"></span>
+      </h3>
+      <ul id="skuCounts"></ul>
+    </div>
+  </div>
+</section>
+
 
   <!-- Confirm Remove Modal -->
 <div id="confirmOverlay" class="modal-overlay" hidden>
