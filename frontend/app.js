@@ -12,6 +12,7 @@ const state = {
   skuCounts: new Map(),      // key: sku_code, val: count
   skuItems: new Map(),       // key: sku_code, val: Set(barcodes)
   expandedSKUs: new Set(),   // which SKUs are expanded in the UI
+  brandBySku: new Map(),     // track brand per SKU
 };
 
 function setFeedback(msg, success = true) {
@@ -97,6 +98,7 @@ function removeSkuItem(sku, barcode) {
     state.skuItems.delete(sku);
     state.skuCounts.delete(sku);
     state.expandedSKUs.delete(sku);
+    state.brandBySku.delete(sku);
   } else {
     state.skuCounts.set(sku, set.size);
   }
@@ -136,9 +138,10 @@ function render() {
       toggle.className = 'toggle';
       toggle.textContent = state.expandedSKUs.has(sku) ? '▼' : '▶';
 
+      const brand = state.brandBySku.get(sku) ?? '';
       const label = document.createElement('span');
       label.className = 'sku-label';
-      label.innerHTML = `${sku} <span class="sku-badge">${n}</span>`;
+      label.innerHTML = `${sku} ${brand ? `· <em>${brand}</em>` : ''} <span class="sku-badge">${n}</span>`;
 
       li.appendChild(toggle);
       li.appendChild(label);
@@ -196,11 +199,16 @@ async function loadExisting() {
     state.skuCounts.clear();
     state.skuItems.clear();
     // keep expandedSKUs as-is so the UI doesn't collapse on refresh
+    state.brandBySku.clear();
 
     for (const r of rows) {
       state.scans.push({ barcode: r.barcode, ok: true, msg: 'Reserved', sku_code: r.sku_code });
       bumpSkuCount(r.sku_code);
       addSkuItem(r.sku_code, r.barcode);
+
+      // keep brand if backend returns it (brand_name / brand)
+      const brand = r.brand_name ?? r.brand ?? null;
+      if (brand) state.brandBySku.set(r.sku_code, brand);
     }
     render();
   } catch (e) {
@@ -241,17 +249,20 @@ if (scanInput) {
       const data = await res.json();
       const item = data.item || (Array.isArray(data.rows) ? data.rows[0] : null);
       const sku_code = item?.sku_code;
+      const brand_name = item?.brand_name ?? item?.brand ?? null;
 
       if (data.ok && item?.was_inserted) {
         state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code });
         bumpSkuCount(sku_code);        // only on first insert
         addSkuItem(sku_code, barcode); // track barcode under its SKU
+        if (brand_name) state.brandBySku.set(sku_code, brand_name);
         setFeedback(`✅ ${barcode} reserved${sku_code ? ` · ${sku_code}` : ''}`);
       } else {
         const msg = data.msg || (item
           ? `Not eligible: ${item.inventory_status} (rank ${item.batch_rank})`
           : (data.code || 'Error'));
         state.scans.push({ barcode, ok: false, msg, sku_code });
+        if (brand_name) state.brandBySku.set(sku_code, brand_name);
         setFeedback(`❌ ${barcode}: ${msg}`, false);
       }
       render();
@@ -363,25 +374,27 @@ document.addEventListener('click', (e) => {
   if (e.target?.id !== 'scanInput') $('#scanInput')?.focus();
 });
 
-
-// ===== Replace with your real array if named differently =====
-window.scannedItems = window.scannedItems || []; 
-// Example push elsewhere in your app:
-// scannedItems.push({ sku_code: "ABC-123", barcode: "0123456789", brand_name: "Acme" });
-
-// ===== Helpers =====
-function summarizeBySku(items) {
-  const map = new Map(); // key=sku_code
-  for (const row of items) {
-    const sku = row.sku_code ?? "";
-    const brand = row.brand_name ?? "";
-    if (!map.has(sku)) map.set(sku, { sku_code: sku, brand_name: brand, count: 0 });
-    map.get(sku).count++;
+// ---------- XLSX Export Helpers ----------
+function buildDetailsFromState() {
+  const out = [];
+  for (const [sku, set] of state.skuItems.entries()) {
+    const brand = state.brandBySku.get(sku) ?? "";
+    for (const code of set) {
+      out.push({ sku_code: sku, barcode: code, brand_name: brand });
+    }
   }
-  // Sort by SKU (then brand as tie-breaker)
-  return Array.from(map.values()).sort((a,b) =>
-    a.sku_code.localeCompare(b.sku_code) || (a.brand_name ?? "").localeCompare(b.brand_name ?? "")
-  );
+  // Sort nicely for Excel
+  out.sort((a, b) => a.sku_code.localeCompare(b.sku_code) || (a.barcode ?? "").localeCompare(b.barcode ?? ""));
+  return out;
+}
+
+function buildSummaryFromState() {
+  const rows = [];
+  for (const [sku, count] of state.skuCounts.entries()) {
+    rows.push({ sku_code: sku, brand_name: state.brandBySku.get(sku) ?? "", count });
+  }
+  rows.sort((a, b) => a.sku_code.localeCompare(b.sku_code));
+  return rows;
 }
 
 function dateStamp() {
@@ -394,7 +407,7 @@ function dateStamp() {
 // Auto-fit-ish column widths based on content length
 function autosizeColumnsFromJSON(rows, headerOrder) {
   const headers = headerOrder && headerOrder.length ? headerOrder : (rows[0] ? Object.keys(rows[0]) : []);
-  const colWidths = headers.map(h => Math.max( (h?.length || 0), 4 )); // min width
+  const colWidths = headers.map(h => Math.max((h?.length || 0), 4)); // min width
   for (const r of rows) {
     headers.forEach((h, i) => {
       const val = r[h] ?? "";
@@ -403,7 +416,7 @@ function autosizeColumnsFromJSON(rows, headerOrder) {
     });
   }
   // Make it a bit roomier
-  return colWidths.map(ch => ({ wch: Math.min(Math.max(ch + 2, 8), 40) })); 
+  return colWidths.map(ch => ({ wch: Math.min(Math.max(ch + 2, 8), 40) }));
 }
 
 function addAutoFilter(ws, headerOrder) {
@@ -424,7 +437,7 @@ function appendTotalsRow(ws, label, countColLetter) {
   // Put SUM on the count column
   const sumCell = `${countColLetter}${lastRowIndex+1}`;
   const firstDataRow = 2; // header is row 1
-  const lastDataRow = lastRowIndex; 
+  const lastDataRow = lastRowIndex;
   ws[sumCell] = { t: 'n', f: `SUM(${countColLetter}${firstDataRow}:${countColLetter}${lastDataRow})` };
 
   // Update sheet ref to include the new totals row
@@ -439,10 +452,8 @@ function exportXlsx() {
     return;
   }
 
-  const summary = summarizeBySku(scannedItems);
-  const details = [...scannedItems].sort((a, b) => 
-    a.sku_code.localeCompare(b.sku_code) || (a.barcode ?? "").localeCompare(b.barcode ?? "")
-  );
+  const summary = buildSummaryFromState();
+  const details = buildDetailsFromState();
 
   // Build workbook
   const wb = XLSX.utils.book_new();
@@ -469,4 +480,3 @@ function exportXlsx() {
 
 // Wire the button
 document.getElementById("btnExportXlsx")?.addEventListener("click", exportXlsx);
-
