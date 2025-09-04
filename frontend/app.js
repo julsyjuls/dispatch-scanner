@@ -32,6 +32,22 @@ function getDispatchIdFromURL() {
 }
 let DISPATCH_ID = getDispatchIdFromURL();
 
+function computeTotalItems() {
+  let total = 0;
+  for (const n of state.skuCounts.values()) total += Number(n) || 0;
+  return total;
+}
+
+function updateSummaryTotalUI() {
+  const el = document.getElementById('summaryTotal');
+  if (!el) return; // if the span isn't in the DOM yet, skip
+  const total = computeTotalItems();
+  el.textContent = total;
+  el.title = `${total} items scanned`;
+  el.style.display = total > 0 ? 'inline-flex' : 'none';
+}
+
+
 // Custom confirm modal (falls back to window.confirm if modal HTML not present)
 function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const overlay = $('#confirmOverlay');
@@ -196,6 +212,7 @@ function render() {
       counts.appendChild(li);
     }
   }
+  updateSummaryTotalUI();
 }
 
 // ---------- Hydrate from server ----------
