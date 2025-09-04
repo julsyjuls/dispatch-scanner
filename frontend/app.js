@@ -427,23 +427,22 @@ function addAutoFilter(ws, headerOrder) {
 }
 
 function appendTotalsRow(ws, label, countColLetter) {
-  // Adds a simple "Total" at the very bottom for the Summary sheet
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
-  const lastRowIndex = range.e.r + 1; // next row (1-based inside Excel)
-  const labelCell = `A${lastRowIndex+1}`;
-  ws[labelCell] = { t: 's', v: label };
+  const nextRowNumber = range.e.r + 2; // 1-based index of the next empty row
 
-  // Put SUM on the count column
-  const sumCell = `${countColLetter}${lastRowIndex+1}`;
-  const firstDataRow = 2; // header is row 1
-  const lastDataRow = lastRowIndex;
-  ws[sumCell] = { t: 'n', f: `SUM(${countColLetter}${firstDataRow}:${countColLetter}${lastDataRow})` };
+  // Write: [ "Total", null, =SUM(C2:C{lastDataRow}) ]
+  const lastDataRow = nextRowNumber - 1;
+  const sumFormula = `SUM(${countColLetter}2:${countColLetter}${lastDataRow})`;
+  XLSX.utils.sheet_add_aoa(ws, [
+    [label, null, { f: sumFormula }]
+  ], { origin: `A${nextRowNumber}` });
 
-  // Update sheet ref to include the new totals row
-  const newRange = { s: range.s, e: { r: lastRowIndex, c: range.e.c } };
+  // Expand sheet range to include the new totals row
+  const newRange = { s: range.s, e: { r: nextRowNumber - 1, c: range.e.c } };
   ws['!ref'] = XLSX.utils.encode_range(newRange);
 }
+
 
 // ===== XLSX Export (Summary + Details) =====
 function exportXlsx() {
