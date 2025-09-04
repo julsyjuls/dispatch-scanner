@@ -362,3 +362,111 @@ document.addEventListener('click', (e) => {
   if (modalOpen) return; // don't steal focus from modal
   if (e.target?.id !== 'scanInput') $('#scanInput')?.focus();
 });
+
+
+// ===== Replace with your real array if named differently =====
+window.scannedItems = window.scannedItems || []; 
+// Example push elsewhere in your app:
+// scannedItems.push({ sku_code: "ABC-123", barcode: "0123456789", brand_name: "Acme" });
+
+// ===== Helpers =====
+function summarizeBySku(items) {
+  const map = new Map(); // key=sku_code
+  for (const row of items) {
+    const sku = row.sku_code ?? "";
+    const brand = row.brand_name ?? "";
+    if (!map.has(sku)) map.set(sku, { sku_code: sku, brand_name: brand, count: 0 });
+    map.get(sku).count++;
+  }
+  // Sort by SKU (then brand as tie-breaker)
+  return Array.from(map.values()).sort((a,b) =>
+    a.sku_code.localeCompare(b.sku_code) || (a.brand_name ?? "").localeCompare(b.brand_name ?? "")
+  );
+}
+
+function dateStamp() {
+  // Local stamp like 2025-09-04_1530
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+// Auto-fit-ish column widths based on content length
+function autosizeColumnsFromJSON(rows, headerOrder) {
+  const headers = headerOrder && headerOrder.length ? headerOrder : (rows[0] ? Object.keys(rows[0]) : []);
+  const colWidths = headers.map(h => Math.max( (h?.length || 0), 4 )); // min width
+  for (const r of rows) {
+    headers.forEach((h, i) => {
+      const val = r[h] ?? "";
+      const len = String(val).length;
+      if (len > colWidths[i]) colWidths[i] = len;
+    });
+  }
+  // Make it a bit roomier
+  return colWidths.map(ch => ({ wch: Math.min(Math.max(ch + 2, 8), 40) })); 
+}
+
+function addAutoFilter(ws, headerOrder) {
+  if (!ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  // Add filter on full header row
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: range.e.r, c: range.e.c } }) };
+}
+
+function appendTotalsRow(ws, label, countColLetter) {
+  // Adds a simple "Total" at the very bottom for the Summary sheet
+  if (!ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const lastRowIndex = range.e.r + 1; // next row (1-based inside Excel)
+  const labelCell = `A${lastRowIndex+1}`;
+  ws[labelCell] = { t: 's', v: label };
+
+  // Put SUM on the count column
+  const sumCell = `${countColLetter}${lastRowIndex+1}`;
+  const firstDataRow = 2; // header is row 1
+  const lastDataRow = lastRowIndex; 
+  ws[sumCell] = { t: 'n', f: `SUM(${countColLetter}${firstDataRow}:${countColLetter}${lastDataRow})` };
+
+  // Update sheet ref to include the new totals row
+  const newRange = { s: range.s, e: { r: lastRowIndex, c: range.e.c } };
+  ws['!ref'] = XLSX.utils.encode_range(newRange);
+}
+
+// ===== XLSX Export (Summary + Details) =====
+function exportXlsx() {
+  if (typeof XLSX === "undefined") {
+    alert("XLSX library not loaded. Include the SheetJS script tag.");
+    return;
+  }
+
+  const summary = summarizeBySku(scannedItems);
+  const details = [...scannedItems].sort((a, b) => 
+    a.sku_code.localeCompare(b.sku_code) || (a.barcode ?? "").localeCompare(b.barcode ?? "")
+  );
+
+  // Build workbook
+  const wb = XLSX.utils.book_new();
+
+  // Summary sheet
+  const summaryHeaders = ["sku_code", "brand_name", "count"];
+  const wsSummary = XLSX.utils.json_to_sheet(summary, { header: summaryHeaders });
+  wsSummary['!cols'] = autosizeColumnsFromJSON(summary, summaryHeaders);
+  addAutoFilter(wsSummary, summaryHeaders);
+  // Totals row (puts "Total" at col A and SUM in column C)
+  appendTotalsRow(wsSummary, "Total", "C");
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+  // Details sheet
+  const detailHeaders = ["sku_code", "barcode", "brand_name"];
+  const wsDetails = XLSX.utils.json_to_sheet(details, { header: detailHeaders });
+  wsDetails['!cols'] = autosizeColumnsFromJSON(details, detailHeaders);
+  addAutoFilter(wsDetails, detailHeaders);
+  XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
+
+  // Done!
+  XLSX.writeFile(wb, `dispatch_export_${dateStamp()}.xlsx`);
+}
+
+// Wire the button
+document.getElementById("btnExportXlsx")?.addEventListener("click", exportXlsx);
+
