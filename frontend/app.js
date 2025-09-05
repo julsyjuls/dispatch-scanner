@@ -14,6 +14,7 @@ const state = {
   expandedSKUs: new Set(),   // which SKUs are expanded in the UI
   brandBySku: new Map(),     // brand per SKU (fallback)
   brandByBarcode: new Map(), // brand per barcode (supports mixed brands)
+  readOnly: false,           // 🚫 lock when dispatch is not Open
 };
 
 function setFeedback(msg, success = true) {
@@ -47,6 +48,37 @@ function updateSummaryTotalUI() {
   el.style.display = total > 0 ? 'inline-flex' : 'none';
 }
 
+// ----- Read-only UI helpers -----
+async function loadMeta() {
+  if (!DISPATCH_ID) return;
+  try {
+    const r = await fetch(`${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/meta`);
+    const j = await r.json();
+    const status = (j?.status || '').toLowerCase();
+    state.readOnly = (status !== 'open');
+    applyReadOnlyUI(status);
+  } catch (e) {
+    // If meta fails, be safe and assume read-only = false to not block legit flows
+    state.readOnly = false;
+    applyReadOnlyUI(null);
+  }
+}
+
+function applyReadOnlyUI(statusLower) {
+  const inp = document.getElementById('scanInput');
+  if (inp) {
+    inp.disabled = state.readOnly;
+    inp.placeholder = state.readOnly ? 'Read-only (Dispatched)' : 'Scan or enter barcode.';
+  }
+  const badge = document.getElementById('dispatchBadge');
+  if (badge) {
+    const suffix = state.readOnly
+      ? (statusLower ? ` · ${statusLower.charAt(0).toUpperCase()}${statusLower.slice(1)}` : ' · Dispatched')
+      : '';
+    badge.textContent = DISPATCH_ID ? `Dispatch #${DISPATCH_ID}${suffix}` : 'No dispatch selected — open this from Softr';
+    badge.style.display = 'inline-block';
+  }
+}
 
 // Custom confirm modal (falls back to window.confirm if modal HTML not present)
 function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
@@ -84,8 +116,8 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   });
 }
 
-// Show badge
-(function showBadge() {
+// Show badge immediately (will be refined by applyReadOnlyUI())
+;(function showBadge() {
   const badge = $('#dispatchBadge');
   if (!badge) return;
   if (DISPATCH_ID) {
@@ -133,7 +165,7 @@ function render() {
         `${s.ok ? '✅' : '❌'} <strong>${s.barcode}</strong>` +
         (s.sku_code ? ` · ${s.sku_code}` : '') +
         (s.msg ? ` · ${s.msg}` : '') +
-        ` <button class="warn remove" data-barcode="${s.barcode}">Remove</button>`;
+        (state.readOnly ? '' : ` <button class="warn remove" data-barcode="${s.barcode}">Remove</button>`);
       list.appendChild(li);
     }
   }
@@ -171,11 +203,10 @@ function render() {
       li.appendChild(toggle);
       li.appendChild(label);
 
-      // If expanded, render the child list of barcodes with their own Remove buttons
+      // If expanded, render the child list of barcodes (remove buttons only if NOT readOnly)
       if (state.expandedSKUs.has(sku)) {
         const ul = document.createElement('ul');
         ul.className = 'barcode-list';
-        // stack items vertically: 1 per row
         ul.style.display = 'flex';
         ul.style.flexDirection = 'column';
         ul.style.gap = '8px';
@@ -183,7 +214,6 @@ function render() {
         for (const code of Array.from(set).sort()) {
           const item = document.createElement('li');
           item.className = 'barcode-chip';
-          // block-level flex so each chip is its own row
           item.style.display = 'flex';
           item.style.alignItems = 'center';
           item.style.gap = '8px';
@@ -193,16 +223,17 @@ function render() {
           codeSpan.className = 'chip-code';
           codeSpan.textContent = brand ? `${code} · ${brand}` : code;
 
-          const rm = document.createElement('button');
-          rm.type = 'button';
-          rm.className = 'chip-remove';
-          rm.textContent = 'Remove';
-          rm.dataset.barcode = code;
-          rm.dataset.sku = sku;
-
-          // Remove sits immediately after barcode · brand
           item.appendChild(codeSpan);
-          item.appendChild(rm);
+
+          if (!state.readOnly) {
+            const rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'chip-remove';
+            rm.textContent = 'Remove';
+            rm.dataset.barcode = code;
+            rm.dataset.sku = sku;
+            item.appendChild(rm);
+          }
 
           ul.appendChild(item);
         }
@@ -243,7 +274,6 @@ async function loadExisting() {
       bumpSkuCount(r.sku_code);
       addSkuItem(r.sku_code, r.barcode);
 
-      // keep brand if backend returns it (brand_name / brand)
       const brand = r.brand_name ?? r.brand ?? null;
       if (brand) {
         state.brandBySku.set(r.sku_code, brand);
@@ -256,7 +286,7 @@ async function loadExisting() {
   }
 }
 
-// ---------- NEW: Hydrate from read-only view endpoint ----------
+// ---------- NEW: Hydrate from read-only items endpoint ----------
 async function loadItemsFromView() {
   if (!DISPATCH_ID) {
     setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false);
@@ -304,6 +334,14 @@ const scanInput = $('#scanInput');
 if (scanInput) {
   scanInput.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
+
+    if (state.readOnly) {
+      setFeedback('This dispatch is read-only.', false);
+      $('#scanInput')?.focus();
+      e.target.value = '';
+      return;
+    }
+
     const barcode = e.target.value.trim();
     e.target.value = '';
     if (!barcode) return;
@@ -336,8 +374,8 @@ if (scanInput) {
 
       if (data.ok && item?.was_inserted) {
         state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code });
-        bumpSkuCount(sku_code);        // only on first insert
-        addSkuItem(sku_code, barcode); // track barcode under its SKU
+        bumpSkuCount(sku_code);
+        addSkuItem(sku_code, barcode);
         if (brand_name) {
           state.brandBySku.set(sku_code, brand_name);
           state.brandByBarcode.set(barcode, brand_name);
@@ -355,7 +393,7 @@ if (scanInput) {
         setFeedback(`❌ ${barcode}: ${msg}`, false);
       }
       render();
-      $('#scanInput')?.focus(); // refocus after handling
+      $('#scanInput')?.focus();
     } catch (err) {
       const msg = String(err?.message || err);
       state.scans.push({ barcode, ok: false, msg });
@@ -368,6 +406,10 @@ if (scanInput) {
 
 // ---------- Unscan (Remove) ----------
 async function unscan(barcode) {
+  if (state.readOnly) {
+    setFeedback('This dispatch is read-only.', false);
+    return;
+  }
   if (!DISPATCH_ID) {
     setFeedback('Missing Dispatch ID.', false);
     return;
@@ -400,6 +442,12 @@ if (scanList) {
   scanList.addEventListener('click', async (e) => {
     const btn = e.target.closest('button.remove');
     if (!btn) return;
+
+    if (state.readOnly) {
+      setFeedback('This dispatch is read-only.', false);
+      return;
+    }
+
     const code = btn.dataset.barcode;
     if (!code) return;
 
@@ -423,6 +471,12 @@ if (countsEl) {
     const chipBtn = e.target.closest('button.chip-remove');
     if (chipBtn) {
       e.stopPropagation();
+
+      if (state.readOnly) {
+        setFeedback('This dispatch is read-only.', false);
+        return;
+      }
+
       const code = chipBtn.dataset.barcode;
       if (!code) return;
       const ok = await confirmModal(
@@ -452,10 +506,10 @@ if (countsEl) {
 }
 
 // ---------- Focus & boot ----------
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   $('#scanInput')?.focus();
-  // ✅ Use the new read-only endpoint for hydration (works for old and new dispatches)
-  loadItemsFromView();
+  await loadMeta();          // 👈 get status and set state.readOnly + UI
+  await loadItemsFromView(); // 👈 hydrate list + summary for any dispatch
 });
 
 // Click anywhere → focus the scanner input (pause when modal open)
