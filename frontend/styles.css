@@ -135,3 +135,54 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
 }
 .barcode-chip .chip-remove:hover { background:#7a1d24; border-color:#7a1d24; }
 .barcode-chip .chip-remove:active { transform: translateY(1px); }
+
+/* 🔐 Password Overlay */
+#auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: grid;
+  place-items: center;
+  z-index: 9999;
+}
+#auth-overlay .auth-box {
+  background: #0f1720;
+  color: #e7eef7;
+  width: min(92vw, 380px);
+  border: 1px solid #223047;
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  text-align: center;
+}
+#auth-overlay h3 {
+  margin: 0 0 10px 0;
+  font-size: 18px;
+}
+#auth-password {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #2b3a4f;
+  border-radius: 10px;
+  background: #0b0f14;
+  color: #e7eef7;
+}
+#auth-submit {
+  margin-top: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #2b3a4f;
+  background: #151c26;
+  color: #e7eef7;
+  cursor: pointer;
+}
+#auth-submit:hover {
+  filter: brightness(1.1);
+}
+#auth-error {
+  color: #ff6b6b;
+  min-height: 1.2em;
+  margin: 8px 0 0 0;
+}
+
