@@ -215,7 +215,7 @@ function render() {
   updateSummaryTotalUI();
 }
 
-// ---------- Hydrate from server ----------
+// ---------- Hydrate from server (legacy scans endpoint) ----------
 async function loadExisting() {
   if (!DISPATCH_ID) {
     setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false);
@@ -250,6 +250,49 @@ async function loadExisting() {
         state.brandByBarcode.set(r.barcode, brand);
       }
     }
+    render();
+  } catch (e) {
+    setFeedback(`Load failed: ${String(e.message || e)}`, false);
+  }
+}
+
+// ---------- NEW: Hydrate from read-only view endpoint ----------
+async function loadItemsFromView() {
+  if (!DISPATCH_ID) {
+    setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false);
+    return;
+  }
+  try {
+    const res = await fetch(`${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/items`);
+    if (!res.ok) {
+      setFeedback(`Couldn't load items (HTTP ${res.status})`, false);
+      return;
+    }
+    const data = await res.json();
+    const rows = data.items || [];
+
+    // rebuild state based on inventory view
+    state.scans = [];
+    state.skuCounts.clear();
+    state.skuItems.clear();
+    state.brandBySku.clear();
+    state.brandByBarcode.clear();
+
+    for (const r of rows) {
+      const barcode = r.barcode;
+      const sku = r.sku_code || '';
+      const brand = r.brand_name || null;
+
+      state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code: sku });
+      bumpSkuCount(sku);
+      addSkuItem(sku, barcode);
+
+      if (brand) {
+        state.brandBySku.set(sku, brand);
+        state.brandByBarcode.set(barcode, brand);
+      }
+    }
+
     render();
   } catch (e) {
     setFeedback(`Load failed: ${String(e.message || e)}`, false);
@@ -342,8 +385,8 @@ async function unscan(barcode) {
     }
     setFeedback(`↩️ ${barcode}: ${data.msg}`, true);
 
-    // Re-hydrate to ensure server state is the source of truth
-    await loadExisting();
+    // Re-hydrate to ensure server state is the source of truth (now from the view)
+    await loadItemsFromView();
     $('#scanInput')?.focus();
   } catch (e) {
     setFeedback(`❌ ${barcode}: ${String(e.message || e)}`, false);
@@ -411,7 +454,8 @@ if (countsEl) {
 // ---------- Focus & boot ----------
 window.addEventListener('load', () => {
   $('#scanInput')?.focus();
-  loadExisting();
+  // ✅ Use the new read-only endpoint for hydration (works for old and new dispatches)
+  loadItemsFromView();
 });
 
 // Click anywhere → focus the scanner input (pause when modal open)
