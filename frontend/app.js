@@ -3,6 +3,37 @@ const $ = (sel) => document.querySelector(sel);
 // 🔒 Your Worker URL
 const API_URL = "https://dispatch-api.julsyjuls.workers.dev";
 
+// 🔐 Page password protection
+const PAGE_PASSWORD = "KAPS1"; // 👈 change here anytime
+
+function ensurePagePassword() {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("auth-overlay");
+    const input   = document.getElementById("auth-password");
+    const submit  = document.getElementById("auth-submit");
+    const errorEl = document.getElementById("auth-error");
+
+    function tryUnlock() {
+      const val = (input.value || "").trim();
+      if (val === PAGE_PASSWORD) {
+        overlay.remove();
+        resolve(true);
+      } else {
+        errorEl.textContent = "❌ Incorrect password. Please try again.";
+        input.value = "";
+        input.focus();
+      }
+    }
+
+    submit.addEventListener("click", tryUnlock);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") tryUnlock(); });
+
+    // Autofocus the password field
+    setTimeout(() => input?.focus(), 0);
+  });
+}
+
+
 // Track whether the custom modal is open (so we don't steal focus)
 let modalOpen = false;
 
@@ -507,10 +538,15 @@ if (countsEl) {
 
 // ---------- Focus & boot ----------
 window.addEventListener('load', async () => {
+  // Wait for password before running the app
+  const ok = await ensurePagePassword();
+  if (!ok) return;
+
   $('#scanInput')?.focus();
-  await loadMeta();          // 👈 get status and set state.readOnly + UI
-  await loadItemsFromView(); // 👈 hydrate list + summary for any dispatch
+  await loadMeta();
+  await loadItemsFromView();
 });
+
 
 // Click anywhere → focus the scanner input (pause when modal open)
 document.addEventListener('click', (e) => {
