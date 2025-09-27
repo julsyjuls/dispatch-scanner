@@ -1,51 +1,45 @@
+// app.js — focus-safe scanner + modal + password (HTML/CSS untouched)
 const $ = (sel) => document.querySelector(sel);
 
 // 🔒 Your Worker URL
 const API_URL = "https://dispatch-api.julsyjuls.workers.dev";
 
 // 🔐 Page password protection
-const PAGE_PASSWORD = "KAPS1"; // 👈 change here anytime
+const PAGE_PASSWORD = "KAPS1"; // 👈 change anytime
 
-function ensurePagePassword() {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById("auth-overlay");
-    const input   = document.getElementById("auth-password");
-    const submit  = document.getElementById("auth-submit");
-    const errorEl = document.getElementById("auth-error");
+// Gates
+let authOpen = true;   // 🔴 start locked: no scan, no autofocus
+let modalOpen = false; // custom confirm modal state
 
-    function tryUnlock() {
-      const val = (input.value || "").trim();
-      if (val === PAGE_PASSWORD) {
-        overlay.remove();
-        resolve(true);
-      } else {
-        errorEl.textContent = "❌ Incorrect password. Please try again.";
-        input.value = "";
-        input.focus();
-      }
-    }
+// Grab key elements once
+const scanInput = $('#scanInput');
+const authOverlay = $('#auth-overlay');
 
-    submit.addEventListener("click", tryUnlock);
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") tryUnlock(); });
-
-    // Autofocus the password field
-    setTimeout(() => input?.focus(), 0);
-  });
+// Remove any stray autofocus and hard-disable the scanner until unlock
+if (scanInput) {
+  scanInput.removeAttribute?.('autofocus');
+  scanInput.disabled = true;
 }
 
-// Track whether the custom modal is open (so we don't steal focus)
-let modalOpen = false;
+// If a stray modal was left visible, hide it on boot
+const confirmOverlay = $('#confirmOverlay');
+if (confirmOverlay && !confirmOverlay.hasAttribute('hidden')) {
+  confirmOverlay.hidden = true;
+}
 
-// ---------- State & helpers ----------
-const state = {
-  scans: [],                 // { barcode, ok, msg, sku_code }
-  skuCounts: new Map(),      // key: sku_code, val: count
-  skuItems: new Map(),       // key: sku_code, val: Set(barcodes)
-  expandedSKUs: new Set(),   // which SKUs are expanded in the UI
-  brandBySku: new Map(),     // brand per SKU (fallback)
-  brandByBarcode: new Map(), // brand per barcode (supports mixed brands)
-  readOnly: false,           // 🚫 lock when dispatch is not Open
-};
+// ---------- Small helpers ----------
+function pauseScanner() {
+  if (!scanInput) return;
+  scanInput.blur();
+  scanInput.disabled = true;
+}
+
+function resumeScanner() {
+  if (!scanInput) return;
+  // respect read-only; we’ll set state.readOnly elsewhere
+  scanInput.disabled = state.readOnly || authOpen || modalOpen;
+  if (!scanInput.disabled) setTimeout(() => scanInput.focus(), 30);
+}
 
 function setFeedback(msg, success = true) {
   const el = $('#feedback');
@@ -58,27 +52,53 @@ function setFeedback(msg, success = true) {
 function getDispatchIdFromURL() {
   const params = new URLSearchParams(location.search);
   const did = params.get('dispatch_id');
-  // keep digits and preserve leading zeros; return as string
   return /^\d+$/.test(did || '') ? did : null;
 }
 let DISPATCH_ID = getDispatchIdFromURL();
 
-function computeTotalItems() {
-  let total = 0;
-  for (const n of state.skuCounts.values()) total += Number(n) || 0;
-  return total;
+// ---------- Password flow (blocks background focus) ----------
+function ensurePagePassword() {
+  return new Promise((resolve) => {
+    const overlay = authOverlay;
+    const input   = $('#auth-password');
+    const submit  = $('#auth-submit');
+    const errorEl = $('#auth-error');
+
+    // Keep focus inside the password box
+    if (document.activeElement) document.activeElement.blur();
+    setTimeout(() => input?.focus(), 0);
+
+    function tryUnlock() {
+      const val = (input.value || "").trim();
+      if (val === PAGE_PASSWORD) {
+        authOpen = false;          // 🟢 unlock
+        overlay?.remove();         // remove overlay
+        resumeScanner();           // enable scanner now
+        resolve(true);
+      } else {
+        errorEl.textContent = "❌ Incorrect password. Please try again.";
+        input.value = "";
+        input.focus();
+      }
+    }
+
+    submit?.addEventListener("click", tryUnlock);
+    input?.addEventListener("keydown", (e) => { if (e.key === "Enter") tryUnlock(); });
+  });
 }
 
-function updateSummaryTotalUI() {
-  const el = document.getElementById('summaryTotal');
-  if (!el) return; // if the span isn't in the DOM yet, skip
-  const total = computeTotalItems();
-  el.textContent = total;
-  el.title = `${total} items scanned`;
-  el.style.display = total > 0 ? 'inline-flex' : 'none';
-}
+// ---------- State ----------
+const state = {
+  scans: [],                 // { barcode, ok, msg, sku_code }
+  skuCounts: new Map(),
+  skuItems: new Map(),
+  expandedSKUs: new Set(),
+  brandBySku: new Map(),
+  brandByBarcode: new Map(),
+  readOnly: false,
+};
 
-// ----- Read-only UI helpers -----
+// ---------- Read-only UI helpers ----------
 async function loadMeta() {
   if (!DISPATCH_ID) return;
   try {
@@ -87,20 +107,20 @@ async function loadMeta() {
     const status = (j?.status || '').toLowerCase();
     state.readOnly = (status !== 'open');
     applyReadOnlyUI(status);
-  } catch (e) {
-    // If meta fails, be safe and assume read-only = false to not block legit flows
+  } catch {
     state.readOnly = false;
     applyReadOnlyUI(null);
+  } finally {
+    resumeScanner(); // ensure disabled/enabled state aligns with readOnly+authOpen+modalOpen
   }
 }
 
 function applyReadOnlyUI(statusLower) {
-  const inp = document.getElementById('scanInput');
-  if (inp) {
-    inp.disabled = state.readOnly;
-    inp.placeholder = state.readOnly ? 'Read-only (Dispatched)' : 'Scan or enter barcode.';
+  if (scanInput) {
+    scanInput.disabled = state.readOnly || authOpen || modalOpen;
+    scanInput.placeholder = state.readOnly ? 'Read-only (Dispatched)' : 'Scan or enter barcode.';
   }
-  const badge = document.getElementById('dispatchBadge');
+  const badge = $('#dispatchBadge');
   if (badge) {
     const suffix = state.readOnly
       ? (statusLower ? ` · ${statusLower.charAt(0).toUpperCase()}${statusLower.slice(1)}` : ' · Dispatched')
@@ -110,113 +130,15 @@ function applyReadOnlyUI(statusLower) {
   }
 }
 
-// ---- Scanner focus control ----
-const scanInput = $('#scanInput');
-
-function pauseScanner() {
-  if (!scanInput) return;
-  scanInput.blur();
-  scanInput.disabled = true; // prevents keydown on the input
-}
-
-function resumeScanner() {
-  if (!scanInput) return;
-  scanInput.disabled = state.readOnly; // respect readOnly
-  if (!state.readOnly) {
-    setTimeout(() => scanInput.focus(), 30);
-  }
-}
-
-// Custom confirm modal (falls back to window.confirm if modal HTML not present)
-function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
-  const overlay = $('#confirmOverlay');
-  const dialog  = overlay?.querySelector('.modal');
-  const titleEl = $('#confirmTitle');
-  const msgEl   = $('#confirmMsg');
-  const okBtn   = $('#confirmOk');
-  const cancelBtn = $('#confirmCancel');
-
-  // Fallback to native confirm if modal markup not present
-  if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn || !dialog) {
-    const plain = String(htmlMessage).replace(/<[^>]*>/g, '');
-    return Promise.resolve(window.confirm(plain));
-  }
-
-  return new Promise((resolve) => {
-    titleEl.textContent = 'Remove item?';
-    msgEl.innerHTML = htmlMessage; // safe: we control content
-    okBtn.textContent = okText;
-    cancelBtn.textContent = cancelText;
-
-    // Open modal + pause scanner + trap focus
-    overlay.hidden = false;
-    modalOpen = true;
-    pauseScanner();
-
-    // Focus the Cancel button first (many barcode scanners press Enter after typing)
-    setTimeout(() => cancelBtn.focus(), 10);
-
-    // Keyboard: Esc = cancel, Enter = confirm (when modal is open)
-    const onKeyDown = (e) => {
-      if (!modalOpen) return;
-      // prevent scanner keystrokes from reaching background
-      e.stopPropagation();
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        cleanup(false);
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        cleanup(true);
-      }
-    };
-
-    // Prevent clicks behind the overlay
-    const onOverlayClick = (e) => {
-      if (e.target === overlay) {
-        // click on the dim background = cancel
-        cleanup(false);
-      }
-    };
-
-    function cleanup(result) {
-      overlay.hidden = true;
-      modalOpen = false;
-
-      // Remove listeners
-      okBtn.onclick = null;
-      cancelBtn.onclick = null;
-      document.removeEventListener('keydown', onKeyDown, true);
-      overlay.removeEventListener('click', onOverlayClick, true);
-
-      // Resume scanner
-      resumeScanner();
-      resolve(result);
-    }
-
-    okBtn.onclick = () => cleanup(true);
-    cancelBtn.onclick = () => cleanup(false);
-
-    document.addEventListener('keydown', onKeyDown, true);
-    overlay.addEventListener('click', onOverlayClick, true);
-
-    // Make sure dialog can receive focus
-    dialog.setAttribute('tabindex', '-1');
-  });
-}
-
-// Show badge immediately (will be refined by applyReadOnlyUI())
-;(function showBadge() {
+// Show badge immediately
+(() => {
   const badge = $('#dispatchBadge');
   if (!badge) return;
-  if (DISPATCH_ID) {
-    badge.textContent = `Dispatch #${DISPATCH_ID}`;
-  } else {
-    badge.textContent = 'No dispatch selected — open this from Softr';
-  }
+  badge.textContent = DISPATCH_ID ? `Dispatch #${DISPATCH_ID}` : 'No dispatch selected — open this from Softr';
   badge.style.display = 'inline-block';
 })();
 
+// ---------- Rendering helpers ----------
 function bumpSkuCount(key) {
   if (!key) return;
   const n = state.skuCounts.get(key) || 0;
@@ -228,7 +150,6 @@ function addSkuItem(sku, barcode) {
   state.skuItems.get(sku).add(barcode);
 }
 function removeSkuItem(sku, barcode) {
-  if (!sku || !barcode) return;
   const set = state.skuItems.get(sku);
   if (!set) return;
   set.delete(barcode);
@@ -242,8 +163,21 @@ function removeSkuItem(sku, barcode) {
   }
 }
 
+function computeTotalItems() {
+  let total = 0;
+  for (const n of state.skuCounts.values()) total += Number(n) || 0;
+  return total;
+}
+function updateSummaryTotalUI() {
+  const el = $('#summaryTotal');
+  if (!el) return;
+  const total = computeTotalItems();
+  el.textContent = total;
+  el.title = `${total} items scanned`;
+  el.style.display = total > 0 ? 'inline-flex' : 'none';
+}
+
 function render() {
-  // Recent scans (last 30)
   const list = $('#scanList');
   if (list) {
     list.innerHTML = '';
@@ -259,13 +193,10 @@ function render() {
     }
   }
 
-  // Counts with expandable barcode lists
   const counts = $('#skuCounts');
   if (counts) {
     counts.innerHTML = '';
-
     const entries = Array.from(state.skuCounts.entries()).sort(([a], [b]) => a.localeCompare(b));
-
     for (const [sku, n] of entries) {
       const li = document.createElement('li');
       li.className = 'sku-row';
@@ -276,7 +207,6 @@ function render() {
       toggle.className = 'toggle';
       toggle.textContent = state.expandedSKUs.has(sku) ? '▼' : '▶';
 
-      // Compute brand label: if multiple brands under this SKU => "Mixed"
       const set = state.skuItems.get(sku) || new Set();
       const brandSet = new Set();
       for (const code of set) {
@@ -292,7 +222,6 @@ function render() {
       li.appendChild(toggle);
       li.appendChild(label);
 
-      // If expanded, render the child list of barcodes (remove buttons only if NOT readOnly)
       if (state.expandedSKUs.has(sku)) {
         const ul = document.createElement('ul');
         ul.className = 'barcode-list';
@@ -335,26 +264,18 @@ function render() {
   updateSummaryTotalUI();
 }
 
-// ---------- Hydrate from server (legacy scans endpoint) ----------
+// ---------- Data hydration ----------
 async function loadExisting() {
-  if (!DISPATCH_ID) {
-    setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false);
-    return;
-  }
+  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false); return; }
   try {
     const res = await fetch(`${API_URL}/api/list?dispatch_id=${encodeURIComponent(DISPATCH_ID)}`);
-    if (!res.ok) {
-      setFeedback(`Couldn't load existing scans (HTTP ${res.status})`, false);
-      return;
-    }
+    if (!res.ok) { setFeedback(`Couldn't load existing scans (HTTP ${res.status})`, false); return; }
     const data = await res.json();
     const rows = data.rows || [];
 
-    // rebuild state
     state.scans = [];
     state.skuCounts.clear();
     state.skuItems.clear();
-    // keep expandedSKUs as-is so the UI doesn't collapse on refresh
     state.brandBySku.clear();
     state.brandByBarcode.clear();
 
@@ -362,7 +283,6 @@ async function loadExisting() {
       state.scans.push({ barcode: r.barcode, ok: true, msg: 'Reserved', sku_code: r.sku_code });
       bumpSkuCount(r.sku_code);
       addSkuItem(r.sku_code, r.barcode);
-
       const brand = r.brand_name ?? r.brand ?? null;
       if (brand) {
         state.brandBySku.set(r.sku_code, brand);
@@ -375,22 +295,14 @@ async function loadExisting() {
   }
 }
 
-// ---------- NEW: Hydrate from read-only items endpoint ----------
 async function loadItemsFromView() {
-  if (!DISPATCH_ID) {
-    setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false);
-    return;
-  }
+  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false); return; }
   try {
     const res = await fetch(`${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/items`);
-    if (!res.ok) {
-      setFeedback(`Couldn't load items (HTTP ${res.status})`, false);
-      return;
-    }
+    if (!res.ok) { setFeedback(`Couldn't load items (HTTP ${res.status})`, false); return; }
     const data = await res.json();
     const rows = data.items || [];
 
-    // rebuild state based on inventory view
     state.scans = [];
     state.skuCounts.clear();
     state.skuItems.clear();
@@ -411,22 +323,78 @@ async function loadItemsFromView() {
         state.brandByBarcode.set(barcode, brand);
       }
     }
-
     render();
   } catch (e) {
     setFeedback(`Load failed: ${String(e.message || e)}`, false);
   }
 }
 
+// ---------- Confirm modal (focus-safe) ----------
+function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
+  const overlay = $('#confirmOverlay');
+  const dialog  = overlay?.querySelector('.modal');
+  const titleEl = $('#confirmTitle');
+  const msgEl   = $('#confirmMsg');
+  const okBtn   = $('#confirmOk');
+  const cancelBtn = $('#confirmCancel');
+
+  // Fallback to native confirm if markup missing
+  if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn || !dialog) {
+    const plain = String(htmlMessage).replace(/<[^>]*>/g, '');
+    return Promise.resolve(window.confirm(plain));
+  }
+
+  return new Promise((resolve) => {
+    titleEl.textContent = 'Remove item?';
+    msgEl.innerHTML = htmlMessage;
+    okBtn.textContent = okText;
+    cancelBtn.textContent = cancelText;
+
+    overlay.hidden = false;
+    modalOpen = true;
+    pauseScanner();
+
+    setTimeout(() => cancelBtn.focus(), 10);
+
+    const onKeyDown = (e) => {
+      if (!modalOpen) return;
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); cleanup(false); }
+      else if (e.key === 'Enter') { e.preventDefault(); cleanup(true); }
+    };
+
+    const onOverlayClick = (e) => { if (e.target === overlay) cleanup(false); };
+
+    function cleanup(result) {
+      overlay.hidden = true;
+      modalOpen = false;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      document.removeEventListener('keydown', onKeyDown, true);
+      overlay.removeEventListener('click', onOverlayClick, true);
+      resumeScanner();
+      resolve(result);
+    }
+
+    okBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+
+    document.addEventListener('keydown', onKeyDown, true);
+    overlay.addEventListener('click', onOverlayClick, true);
+    dialog.setAttribute('tabindex', '-1');
+  });
+}
+
 // ---------- Scan handler ----------
 if (scanInput) {
   scanInput.addEventListener('keydown', async (e) => {
+    if (authOpen || modalOpen) return; // ⛔️ block while password/modal showing
     if (e.key !== 'Enter') return;
 
     if (state.readOnly) {
       setFeedback('This dispatch is read-only.', false);
-      $('#scanInput')?.focus();
-      e.target.value = '';
+      scanInput.value = '';
+      scanInput.focus();
       return;
     }
 
@@ -451,7 +419,7 @@ if (scanInput) {
         state.scans.push({ barcode, ok: false, msg: `HTTP ${res.status} ${text}` });
         setFeedback(`❌ ${barcode}: HTTP ${res.status}`, false);
         render();
-        $('#scanInput')?.focus();
+        scanInput.focus();
         return;
       }
 
@@ -470,9 +438,7 @@ if (scanInput) {
         }
         setFeedback(`✅ ${barcode} reserved${sku_code ? ` · ${sku_code}` : ''}`);
       } else {
-        const msg = data.msg || (item
-          ? `Not eligible: ${item.inventory_status} (rank ${item.batch_rank})`
-          : (data.code || 'Error'));
+        const msg = data.msg || (item ? `Not eligible: ${item.inventory_status} (rank ${item.batch_rank})` : (data.code || 'Error'));
         state.scans.push({ barcode, ok: false, msg, sku_code });
         if (brand_name) {
           state.brandBySku.set(sku_code, brand_name);
@@ -481,27 +447,21 @@ if (scanInput) {
         setFeedback(`❌ ${barcode}: ${msg}`, false);
       }
       render();
-      $('#scanInput')?.focus();
+      scanInput.focus();
     } catch (err) {
       const msg = String(err?.message || err);
       state.scans.push({ barcode, ok: false, msg });
       setFeedback(`❌ ${barcode}: ${msg}`, false);
       render();
-      $('#scanInput')?.focus();
+      scanInput.focus();
     }
   });
 }
 
 // ---------- Unscan (Remove) ----------
 async function unscan(barcode) {
-  if (state.readOnly) {
-    setFeedback('This dispatch is read-only.', false);
-    return;
-  }
-  if (!DISPATCH_ID) {
-    setFeedback('Missing Dispatch ID.', false);
-    return;
-  }
+  if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
+  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID.', false); return; }
   try {
     const res = await fetch(`${API_URL}/api/unscan`, {
       method: 'POST',
@@ -515,12 +475,11 @@ async function unscan(barcode) {
     }
     setFeedback(`↩️ ${barcode}: ${data.msg}`, true);
 
-    // Re-hydrate to ensure server state is the source of truth (now from the view)
     await loadItemsFromView();
-    $('#scanInput')?.focus();
+    scanInput?.focus();
   } catch (e) {
     setFeedback(`❌ ${barcode}: ${String(e.message || e)}`, false);
-    $('#scanInput')?.focus();
+    scanInput?.focus();
   }
 }
 
@@ -531,10 +490,7 @@ if (scanList) {
     const btn = e.target.closest('button.remove');
     if (!btn) return;
 
-    if (state.readOnly) {
-      setFeedback('This dispatch is read-only.', false);
-      return;
-    }
+    if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
 
     const code = btn.dataset.barcode;
     if (!code) return;
@@ -544,26 +500,21 @@ if (scanList) {
       'Remove',
       'Cancel'
     );
-    if (!ok) { $('#scanInput')?.focus(); return; }
+    if (!ok) { scanInput?.focus(); return; }
 
     await unscan(code);
-    $('#scanInput')?.focus();
+    scanInput?.focus();
   });
 }
 
-// Toggle expand/collapse on counts panel + per-barcode remove
+// Toggle expand/collapse + per-barcode remove
 const countsEl = $('#skuCounts');
 if (countsEl) {
   countsEl.addEventListener('click', async (e) => {
-    // If clicking the remove button on a chip, don't toggle row
     const chipBtn = e.target.closest('button.chip-remove');
     if (chipBtn) {
       e.stopPropagation();
-
-      if (state.readOnly) {
-        setFeedback('This dispatch is read-only.', false);
-        return;
-      }
+      if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
 
       const code = chipBtn.dataset.barcode;
       if (!code) return;
@@ -572,42 +523,44 @@ if (countsEl) {
         'Remove',
         'Cancel'
       );
-      if (!ok) { $('#scanInput')?.focus(); return; }
+      if (!ok) { scanInput?.focus(); return; }
       await unscan(code);
-      $('#scanInput')?.focus();
+      scanInput?.focus();
       return;
     }
 
-    // Otherwise, toggle the SKU row expand/collapse
     const row = e.target.closest('.sku-row');
     if (!row) return;
     const sku = row.dataset.sku;
     if (!sku) return;
 
-    if (state.expandedSKUs.has(sku)) {
-      state.expandedSKUs.delete(sku);
-    } else {
-      state.expandedSKUs.add(sku);
-    }
+    if (state.expandedSKUs.has(sku)) state.expandedSKUs.delete(sku);
+    else state.expandedSKUs.add(sku);
     render();
   });
 }
 
-// ---------- Focus & boot ----------
+// ---------- Boot ----------
 window.addEventListener('load', async () => {
   // Wait for password before running the app
-  const ok = await ensurePagePassword();
-  if (!ok) return;
+  await ensurePagePassword();
 
-  $('#scanInput')?.focus();
+  // Now we can safely enable scanner (loadMeta may still set readOnly=true)
   await loadMeta();
   await loadItemsFromView();
+
+  // if unlocked and not read-only, focus it just once
+  resumeScanner();
 });
 
-// Click anywhere → focus the scanner input (pause when modal open)
+// Global click-to-refocus: disabled while password/modal are open
 document.addEventListener('click', (e) => {
-  if (modalOpen) return; // don't steal focus from modal
-  if (e.target?.id !== 'scanInput') $('#scanInput')?.focus();
+  if (authOpen || modalOpen) return;
+  const t = e.target;
+  // ignore interactive elements and clicks inside modal overlay
+  if (t.closest('#confirmOverlay') ||
+      ['INPUT', 'BUTTON', 'A', 'SELECT', 'TEXTAREA', 'LABEL'].includes(t.tagName)) return;
+  scanInput?.focus();
 });
 
 // ---------- XLSX Export Helpers ----------
@@ -619,13 +572,11 @@ function buildDetailsFromState() {
       out.push({ sku_code: sku, barcode: code, brand_name: brand });
     }
   }
-  // Sort nicely for Excel
   out.sort((a, b) => a.sku_code.localeCompare(b.sku_code) || (a.barcode ?? "").localeCompare(b.barcode ?? ""));
   return out;
 }
 
 function buildSummaryFromState() {
-  // Count by composite key (sku|brand) so mixed brands split rows
   const byKey = new Map();
   for (const [sku, set] of state.skuItems.entries()) {
     for (const code of set) {
@@ -647,16 +598,14 @@ function buildSummaryFromState() {
 }
 
 function dateStamp() {
-  // Local stamp like 2025-09-04_1530
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
 
-// Auto-fit-ish column widths based on content length
 function autosizeColumnsFromJSON(rows, headerOrder) {
   const headers = headerOrder && headerOrder.length ? headerOrder : (rows[0] ? Object.keys(rows[0]) : []);
-  const colWidths = headers.map(h => Math.max((h?.length || 0), 4)); // min width
+  const colWidths = headers.map(h => Math.max((h?.length || 0), 4));
   for (const r of rows) {
     headers.forEach((h, i) => {
       const val = r[h] ?? "";
@@ -664,72 +613,54 @@ function autosizeColumnsFromJSON(rows, headerOrder) {
       if (len > colWidths[i]) colWidths[i] = len;
     });
   }
-  // Make it a bit roomier
   return colWidths.map(ch => ({ wch: Math.min(Math.max(ch + 2, 8), 40) }));
 }
 
-function addAutoFilter(ws, headerOrder) {
+function addAutoFilter(ws) {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
-  // Add filter on full header row
   ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: range.e.r, c: range.e.c } }) };
 }
 
-// ✅ UPDATED: write value + formula so it's never blank
 function appendTotalsRow(ws, label, countColLetter, totalValue) {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
-  const nextRowNumber = range.e.r + 2; // 1-based index of the next empty row
-
+  const nextRowNumber = range.e.r + 2;
   const sumFormula = `SUM(${countColLetter}2:${countColLetter}${nextRowNumber - 1})`;
   XLSX.utils.sheet_add_aoa(ws, [
     [label, null, { t: 'n', v: Number(totalValue) || 0, f: sumFormula }]
   ], { origin: `A${nextRowNumber}` });
-
-  // Expand sheet range to include the new totals row
   const newRange = { s: range.s, e: { r: nextRowNumber - 1, c: range.e.c } };
   ws['!ref'] = XLSX.utils.encode_range(newRange);
 }
 
-// ===== XLSX Export (Summary + Details) =====
 function exportXlsx() {
-  if (typeof XLSX === "undefined") {
-    alert("XLSX library not loaded. Include the SheetJS script tag.");
-    return;
-  }
+  if (typeof XLSX === "undefined") { alert("XLSX library not loaded. Include the SheetJS script tag."); return; }
 
   const summary = buildSummaryFromState();
   const details = buildDetailsFromState();
 
-  // Build workbook
   const wb = XLSX.utils.book_new();
 
-  // Summary sheet
   const summaryHeaders = ["sku_code", "brand_name", "count"];
   const wsSummary = XLSX.utils.json_to_sheet(summary, { header: summaryHeaders });
   wsSummary['!cols'] = autosizeColumnsFromJSON(summary, summaryHeaders);
-  addAutoFilter(wsSummary, summaryHeaders);
+  addAutoFilter(wsSummary);
 
-  // ✅ compute and write a real value for Total (and keep the formula)
   const totalCount = summary.reduce((s, r) => s + Number(r.count || 0), 0);
   appendTotalsRow(wsSummary, "Total", "C", totalCount);
 
   XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
-
-  // (optional but helpful) force Excel to recalc on open
   wb.Workbook = wb.Workbook || {};
   wb.Workbook.CalcPr = { fullCalcOnLoad: true };
 
-  // Details sheet
   const detailHeaders = ["sku_code", "barcode", "brand_name"];
   const wsDetails = XLSX.utils.json_to_sheet(details, { header: detailHeaders });
   wsDetails['!cols'] = autosizeColumnsFromJSON(details, detailHeaders);
-  addAutoFilter(wsDetails, detailHeaders);
+  addAutoFilter(wsDetails);
   XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
 
-  // Done!
   XLSX.writeFile(wb, `dispatch_export_${dateStamp()}.xlsx`);
 }
 
-// Wire the button
 document.getElementById("btnExportXlsx")?.addEventListener("click", exportXlsx);
