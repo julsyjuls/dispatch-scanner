@@ -33,7 +33,6 @@ function ensurePagePassword() {
   });
 }
 
-
 // Track whether the custom modal is open (so we don't steal focus)
 let modalOpen = false;
 
@@ -111,16 +110,34 @@ function applyReadOnlyUI(statusLower) {
   }
 }
 
+// ---- Scanner focus control ----
+const scanInput = $('#scanInput');
+
+function pauseScanner() {
+  if (!scanInput) return;
+  scanInput.blur();
+  scanInput.disabled = true; // prevents keydown on the input
+}
+
+function resumeScanner() {
+  if (!scanInput) return;
+  scanInput.disabled = state.readOnly; // respect readOnly
+  if (!state.readOnly) {
+    setTimeout(() => scanInput.focus(), 30);
+  }
+}
+
 // Custom confirm modal (falls back to window.confirm if modal HTML not present)
 function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const overlay = $('#confirmOverlay');
+  const dialog  = overlay?.querySelector('.modal');
   const titleEl = $('#confirmTitle');
   const msgEl   = $('#confirmMsg');
   const okBtn   = $('#confirmOk');
   const cancelBtn = $('#confirmCancel');
 
   // Fallback to native confirm if modal markup not present
-  if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn) {
+  if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn || !dialog) {
     const plain = String(htmlMessage).replace(/<[^>]*>/g, '');
     return Promise.resolve(window.confirm(plain));
   }
@@ -131,19 +148,60 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
     okBtn.textContent = okText;
     cancelBtn.textContent = cancelText;
 
+    // Open modal + pause scanner + trap focus
     overlay.hidden = false;
     modalOpen = true;
+    pauseScanner();
 
-    const cleanup = (result) => {
+    // Focus the Cancel button first (many barcode scanners press Enter after typing)
+    setTimeout(() => cancelBtn.focus(), 10);
+
+    // Keyboard: Esc = cancel, Enter = confirm (when modal is open)
+    const onKeyDown = (e) => {
+      if (!modalOpen) return;
+      // prevent scanner keystrokes from reaching background
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cleanup(false);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        cleanup(true);
+      }
+    };
+
+    // Prevent clicks behind the overlay
+    const onOverlayClick = (e) => {
+      if (e.target === overlay) {
+        // click on the dim background = cancel
+        cleanup(false);
+      }
+    };
+
+    function cleanup(result) {
       overlay.hidden = true;
       modalOpen = false;
+
+      // Remove listeners
       okBtn.onclick = null;
       cancelBtn.onclick = null;
+      document.removeEventListener('keydown', onKeyDown, true);
+      overlay.removeEventListener('click', onOverlayClick, true);
+
+      // Resume scanner
+      resumeScanner();
       resolve(result);
-    };
+    }
 
     okBtn.onclick = () => cleanup(true);
     cancelBtn.onclick = () => cleanup(false);
+
+    document.addEventListener('keydown', onKeyDown, true);
+    overlay.addEventListener('click', onOverlayClick, true);
+
+    // Make sure dialog can receive focus
+    dialog.setAttribute('tabindex', '-1');
   });
 }
 
@@ -361,7 +419,6 @@ async function loadItemsFromView() {
 }
 
 // ---------- Scan handler ----------
-const scanInput = $('#scanInput');
 if (scanInput) {
   scanInput.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
@@ -546,7 +603,6 @@ window.addEventListener('load', async () => {
   await loadMeta();
   await loadItemsFromView();
 });
-
 
 // Click anywhere → focus the scanner input (pause when modal open)
 document.addEventListener('click', (e) => {
