@@ -16,59 +16,54 @@
     <div id="dispatchBadge" class="badge"></div>
   </section>
 
-<div class="panel" style="padding:14px; border-bottom:1px solid #1b2430; display:flex; justify-content:flex-end;">
-  <button id="btnExportXlsx">⬇️ Export </button>
-</div>
-
-<!-- SheetJS (needed for XLSX export) -->
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-  
-  <section class="panel">
-  <label>Scan Barcode</label>
-  <input id="scanInput" type="text" autofocus placeholder="Scan or enter barcode." />
-  <div id="feedback" class="feedback"></div>
-
-  <div class="columns">
-    <div class="col">
-      <h3>Recent Scans</h3>
-      <ul id="scanList"></ul>
-    </div>
-    <div class="col">
-      <!-- ⬇️ changed this line -->
-      <h3 id="summaryHeading">
-        Summary <span id="summaryTotal" class="sku-badge" style="display:none;"></span>
-      </h3>
-      <ul id="skuCounts"></ul>
-    </div>
+  <div class="panel" style="padding:14px; border-bottom:1px solid #1b2430; display:flex; justify-content:flex-end;">
+    <button id="btnExportXlsx">⬇️ Export </button>
   </div>
-</section>
 
+  <!-- SheetJS (needed for XLSX export) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <section class="panel">
+    <label for="scanInput">Scan Barcode</label>
+    <input id="scanInput" type="text" autofocus placeholder="Scan or enter barcode." />
+    <div id="feedback" class="feedback"></div>
+
+    <div class="columns">
+      <div class="col">
+        <h3>Recent Scans</h3>
+        <ul id="scanList"></ul>
+      </div>
+      <div class="col">
+        <h3 id="summaryHeading">
+          Summary <span id="summaryTotal" class="sku-badge" style="display:none;"></span>
+        </h3>
+        <ul id="skuCounts"></ul>
+      </div>
+    </div>
+  </section>
 
   <!-- Confirm Remove Modal -->
-<div id="confirmOverlay" class="modal-overlay" hidden>
-  <div class="modal">
-    <h2 id="confirmTitle">Remove item?</h2>
-    <p id="confirmMsg"></p>
-    <div class="modal-actions">
-      <button id="confirmCancel">Cancel</button>
-      <button id="confirmOk" class="warn">Remove</button>
+  <div id="confirmOverlay" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMsg" tabindex="-1">
+      <h2 id="confirmTitle">Remove item?</h2>
+      <p id="confirmMsg"></p>
+      <div class="modal-actions">
+        <button id="confirmCancel" type="button">Cancel</button>
+        <button id="confirmOk" class="warn" type="button">Remove</button>
+      </div>
     </div>
   </div>
-</div>
 
-<script src="./app.js"></script>
-</body>
-
-<!-- 🔐 Password Prompt Overlay -->
-<div id="auth-overlay">
-  <div class="auth-box">
-    <h3>🔐 Enter Password</h3>
-    <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" />
-    <button id="auth-submit" type="button">Submit</button>
-    <p id="auth-error"></p>
+  <!-- 🔐 Password Prompt Overlay (moved inside <body>) -->
+  <div id="auth-overlay">
+    <div class="auth-box">
+      <h3>🔐 Enter Password</h3>
+      <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" />
+      <button id="auth-submit" type="button">Submit</button>
+      <p id="auth-error"></p>
+    </div>
   </div>
-</div>
 
-
+  <script src="./app.js"></script>
+</body>
 </html>
