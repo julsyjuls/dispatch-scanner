@@ -12,6 +12,11 @@
     <div class="small">Fast scan → live validate → reserve</div>
   </header>
 
+  <!-- 🔔 Return Mode banner (auto-shown by app.js when ?mode=return) -->
+  <div id="returnBanner" class="mode-banner" hidden>
+    <strong>Return Mode</strong> — items scanned here are <em>reverted to Available</em> and a return record is saved.
+  </div>
+
   <section class="panel">
     <div id="dispatchBadge" class="badge"></div>
   </section>
@@ -54,7 +59,7 @@
     </div>
   </div>
 
-  <!-- 🔐 Password Prompt Overlay (moved inside <body>) -->
+  <!-- 🔐 Password Prompt Overlay -->
   <div id="auth-overlay">
     <div class="auth-box">
       <h3>🔐 Enter Password</h3>
