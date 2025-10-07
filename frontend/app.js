@@ -103,7 +103,7 @@ const state = {
   returnedItems: [],        // OPTIONAL: [{ sku, barcode, brand }]
 };
 
-// ---------- Read-only UI ----------
+// ---------- Read-only UI -----------
 async function loadMeta() {
   if (!DISPATCH_ID) return;
   try {
