@@ -348,6 +348,23 @@ function onSkuCountsKeydown(e) {
   }
 }
 
+// ---- Fetch returned items for this dispatch (from history table) ----
+async function fetchReturnsForDispatch(dispatchId) {
+  try {
+    const res = await fetch(
+      `${API_URL}/api/dispatch/${encodeURIComponent(dispatchId)}/returns?t=${Date.now()}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    // expect: { items: [{ barcode, sku_code, brand_name, date_returned, ... }] }
+    return Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    return [];
+  }
+}
+
+
 // ---------- XLSX Export (Summary + Details + Returned Items) ----------
 async function exportDispatchToXlsx() {
   if (!DISPATCH_ID) {
@@ -355,10 +372,10 @@ async function exportDispatchToXlsx() {
     return;
   }
   try {
-    // Refresh items to be accurate; also resets returnedItems in loadItemsFromView
+    // Refresh items (still needed for Summary/Details)
     await loadItemsFromView();
 
-    // Sheet2: Details (sku_code, barcode, brand_name)
+    // --- Details sheet from current dispatch items ---
     const details = [];
     const skus = Array.from(state.skuItems.keys()).sort((a, b) => a.localeCompare(b));
     for (const sku of skus) {
@@ -373,7 +390,7 @@ async function exportDispatchToXlsx() {
       }
     }
 
-    // Sheet1: Summary (sku_code, brand_name, count) + TOTAL row
+    // --- Summary sheet with TOTAL row ---
     const summary = [];
     let grandTotal = 0;
     for (const sku of skus) {
@@ -384,23 +401,32 @@ async function exportDispatchToXlsx() {
     }
     summary.push({ sku_code: "TOTAL", brand_name: "", count: grandTotal });
 
-    // Sheet3: Returned Items (optional)
-    // Prefer items flagged by API; fallback to session “Returned” scans
-    const returnedRows = [...(state.returnedItems || [])];
-    if (returnedRows.length === 0) {
+    // --- Returned Items sheet (fetch from API history) ---
+    let returned = [];
+    const apiReturned = await fetchReturnsForDispatch(DISPATCH_ID);
+    if (apiReturned.length > 0) {
+      returned = apiReturned
+        .map(r => ({
+          sku_code: r.sku_code || "",
+          barcode: r.barcode,
+          brand_name: r.brand_name || "",
+          // keep extra column if available; Excel will include it if present
+          date_returned: r.date_returned || null
+        }))
+        // stable order: by sku then barcode
+        .sort((a, b) => (a.sku_code || "").localeCompare(b.sku_code || "") || (a.barcode || "").localeCompare(b.barcode || ""));
+    } else {
+      // fallback: session-only returns (if user returned in this same tab)
+      const fallback = [];
       for (const s of state.scans) {
         if (String(s.msg || "").toLowerCase() === "returned") {
           const sku = s.sku_code || "";
           const brand = state.brandByBarcode.get(s.barcode) || state.brandBySku.get(sku) || "";
-          returnedRows.push({ sku, barcode: s.barcode, brand });
+          fallback.push({ sku_code: sku, barcode: s.barcode, brand_name: brand });
         }
       }
+      returned = fallback.sort((a, b) => (a.sku_code || "").localeCompare(b.sku_code || "") || (a.barcode || "").localeCompare(b.barcode || ""));
     }
-    const returned = returnedRows.map(r => ({
-      sku_code: r.sku || r.sku_code || "",
-      barcode: r.barcode,
-      brand_name: r.brand || r.brand_name || ""
-    }));
 
     if (!details.length && !returned.length) {
       setFeedback("Nothing to export for this dispatch.", false);
@@ -411,9 +437,9 @@ async function exportDispatchToXlsx() {
       return;
     }
 
-    const wsSummary  = XLSX.utils.json_to_sheet(summary);
-    const wsDetails  = XLSX.utils.json_to_sheet(details);
     const wb = XLSX.utils.book_new();
+    const wsSummary = XLSX.utils.json_to_sheet(summary);
+    const wsDetails = XLSX.utils.json_to_sheet(details);
     XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
     XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
 
@@ -429,6 +455,7 @@ async function exportDispatchToXlsx() {
     setFeedback(`Export failed: ${String(err?.message || err)}`, false);
   }
 }
+
 
 // ---------- Scan handler ----------
 if (scanInput) {
