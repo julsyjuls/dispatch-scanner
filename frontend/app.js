@@ -27,6 +27,21 @@ if (confirmOverlay && !confirmOverlay.hasAttribute('hidden')) {
   confirmOverlay.hidden = true;
 }
 
+// ---------- URL helpers ----------
+function getDispatchIdFromURL() {
+  const params = new URLSearchParams(location.search);
+  const did = params.get('dispatch_id');
+  return /^\d+$/.test(did || '') ? did : null;
+}
+function getModeFromURL() {
+  const params = new URLSearchParams(location.search);
+  const m = (params.get('mode') || '').toLowerCase();
+  return m === 'return' ? 'return' : 'dispatch';
+}
+let DISPATCH_ID = getDispatchIdFromURL();
+const MODE = getModeFromURL();
+const IS_RETURN_MODE = MODE === 'return';
+
 // ---------- Small helpers ----------
 function pauseScanner() {
   if (!scanInput) return;
@@ -36,7 +51,9 @@ function pauseScanner() {
 
 function resumeScanner() {
   if (!scanInput) return;
-  scanInput.disabled = state.readOnly || authOpen || modalOpen;
+  // In return mode, scanner should NOT be blocked by dispatch readOnly rules
+  const shouldDisable = authOpen || modalOpen || (!IS_RETURN_MODE && state.readOnly);
+  scanInput.disabled = shouldDisable;
   if (!scanInput.disabled) setTimeout(() => scanInput.focus(), 30);
 }
 
@@ -47,13 +64,6 @@ function setFeedback(msg, success = true) {
   el.classList.toggle('success', !!success);
   el.classList.toggle('error', !success);
 }
-
-function getDispatchIdFromURL() {
-  const params = new URLSearchParams(location.search);
-  const did = params.get('dispatch_id');
-  return /^\d+$/.test(did || '') ? did : null;
-}
-let DISPATCH_ID = getDispatchIdFromURL();
 
 // ---------- Password flow ----------
 function ensurePagePassword() {
@@ -93,7 +103,7 @@ const state = {
   expandedSKUs: new Set(),
   brandBySku: new Map(),
   brandByBarcode: new Map(),
-  readOnly: false,
+  readOnly: false,  // only applies to Dispatch Mode
 };
 
 // ---------- Read-only UI helpers ----------
@@ -115,7 +125,8 @@ async function loadMeta() {
 
 function applyReadOnlyUI(statusLower) {
   if (scanInput) {
-    scanInput.disabled = state.readOnly || authOpen || modalOpen;
+    const disabled = state.readOnly || authOpen || modalOpen;
+    scanInput.disabled = disabled;
     scanInput.placeholder = state.readOnly ? 'Read-only (Dispatched)' : 'Scan or enter barcode.';
   }
   const badge = $('#dispatchBadge');
@@ -132,7 +143,11 @@ function applyReadOnlyUI(statusLower) {
 (() => {
   const badge = $('#dispatchBadge');
   if (!badge) return;
-  badge.textContent = DISPATCH_ID ? `Dispatch #${DISPATCH_ID}` : 'No dispatch selected — open this from Softr';
+  if (IS_RETURN_MODE) {
+    badge.textContent = 'Return Mode';
+  } else {
+    badge.textContent = DISPATCH_ID ? `Dispatch #${DISPATCH_ID}` : 'No dispatch selected — open this from Softr';
+  }
   badge.style.display = 'inline-block';
 })();
 
@@ -184,71 +199,75 @@ function render() {
         `${s.ok ? '✅' : '❌'} <strong>${s.barcode}</strong>` +
         (s.sku_code ? ` · ${s.sku_code}` : '') +
         (s.msg ? ` · ${s.msg}` : '') +
-        (state.readOnly ? '' : ` <button class="warn remove" data-barcode="${s.barcode}">Remove</button>`);
+        // Hide the Remove buttons entirely in Return Mode
+        (!IS_RETURN_MODE && !state.readOnly ? ` <button class="warn remove" data-barcode="${s.barcode}">Remove</button>` : '');
       list.appendChild(li);
     }
   }
   const counts = $('#skuCounts');
   if (counts) {
     counts.innerHTML = '';
-    const entries = Array.from(state.skuCounts.entries()).sort(([a], [b]) => a.localeCompare(b));
-    for (const [sku, n] of entries) {
-      const li = document.createElement('li');
-      li.className = 'sku-row';
-      li.dataset.sku = sku;
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'toggle';
-      toggle.textContent = state.expandedSKUs.has(sku) ? '▼' : '▶';
-      const set = state.skuItems.get(sku) || new Set();
-      const brandSet = new Set();
-      for (const code of set) {
-        const b = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
-        if (b) brandSet.add(b);
-      }
-      const brandLabel = brandSet.size > 1 ? 'Mixed' : (brandSet.values().next().value || '');
-      const label = document.createElement('span');
-      label.className = 'sku-label';
-      label.innerHTML = `${sku} ${brandLabel ? `· <em>${brandLabel}</em>` : ''} <span class="sku-badge">${n}</span>`;
-      li.appendChild(toggle);
-      li.appendChild(label);
-      if (state.expandedSKUs.has(sku)) {
-        const ul = document.createElement('ul');
-        ul.className = 'barcode-list';
-        ul.style.display = 'flex';
-        ul.style.flexDirection = 'column';
-        ul.style.gap = '8px';
-        for (const code of Array.from(set).sort()) {
-          const item = document.createElement('li');
-          item.className = 'barcode-chip';
-          item.style.display = 'flex';
-          item.style.alignItems = 'center';
-          item.style.gap = '8px';
-          const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
-          const codeSpan = document.createElement('span');
-          codeSpan.className = 'chip-code';
-          codeSpan.textContent = brand ? `${code} · ${brand}` : code;
-          item.appendChild(codeSpan);
-          if (!state.readOnly) {
-            const rm = document.createElement('button');
-            rm.type = 'button';
-            rm.className = 'chip-remove';
-            rm.textContent = 'Remove';
-            rm.dataset.barcode = code;
-            rm.dataset.sku = sku;
-            item.appendChild(rm);
-          }
-          ul.appendChild(item);
+    // In return mode we don't populate sku counts; leave empty
+    if (!IS_RETURN_MODE) {
+      const entries = Array.from(state.skuCounts.entries()).sort(([a], [b]) => a.localeCompare(b));
+      for (const [sku, n] of entries) {
+        const li = document.createElement('li');
+        li.className = 'sku-row';
+        li.dataset.sku = sku;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'toggle';
+        toggle.textContent = state.expandedSKUs.has(sku) ? '▼' : '▶';
+        const set = state.skuItems.get(sku) || new Set();
+        const brandSet = new Set();
+        for (const code of set) {
+          const b = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
+          if (b) brandSet.add(b);
         }
-        li.appendChild(ul);
+        const brandLabel = brandSet.size > 1 ? 'Mixed' : (brandSet.values().next().value || '');
+        const label = document.createElement('span');
+        label.className = 'sku-label';
+        label.innerHTML = `${sku} ${brandLabel ? `· <em>${brandLabel}</em>` : ''} <span class="sku-badge">${n}</span>`;
+        li.appendChild(toggle);
+        li.appendChild(label);
+        if (state.expandedSKUs.has(sku)) {
+          const ul = document.createElement('ul');
+          ul.className = 'barcode-list';
+          ul.style.display = 'flex';
+          ul.style.flexDirection = 'column';
+          ul.style.gap = '8px';
+          for (const code of Array.from(set).sort()) {
+            const item = document.createElement('li');
+            item.className = 'barcode-chip';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '8px';
+            const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
+            const codeSpan = document.createElement('span');
+            codeSpan.className = 'chip-code';
+            codeSpan.textContent = brand ? `${code} · ${brand}` : code;
+            item.appendChild(codeSpan);
+            if (!state.readOnly) {
+              const rm = document.createElement('button');
+              rm.type = 'button';
+              rm.className = 'chip-remove';
+              rm.textContent = 'Remove';
+              rm.dataset.barcode = code;
+              rm.dataset.sku = sku;
+              item.appendChild(rm);
+            }
+            ul.appendChild(item);
+          }
+          li.appendChild(ul);
+        }
+        counts.appendChild(li);
       }
-      counts.appendChild(li);
     }
   }
   updateSummaryTotalUI();
 }
 
-// ---------- Data hydration ----------
+// ---------- Data hydration (Dispatch Mode only) ----------
 async function loadExisting() {
   if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID.', false); return; }
   try {
@@ -357,15 +376,46 @@ if (scanInput) {
   scanInput.addEventListener('keydown', async (e) => {
     if (authOpen || modalOpen) return;
     if (e.key !== 'Enter') return;
-    if (state.readOnly) {
-      setFeedback('This dispatch is read-only.', false);
-      scanInput.value = '';
-      scanInput.focus();
-      return;
-    }
+
     const barcode = e.target.value.trim();
     e.target.value = '';
     if (!barcode) return;
+
+    // 🔁 Return Mode
+    if (IS_RETURN_MODE) {
+      try {
+        const res = await fetch(`${API_URL}/api/return`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ barcode })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          setFeedback(`✅ ${barcode} returned (now Available)`);
+          state.scans.push({ barcode, ok: true, msg: 'Returned' });
+        } else {
+          const msg = data?.msg || `HTTP ${res.status}`;
+          setFeedback(`❌ ${barcode}: ${msg}`, false);
+          state.scans.push({ barcode, ok: false, msg });
+        }
+        render();
+        scanInput.focus();
+      } catch (err) {
+        const msg = String(err?.message || err);
+        setFeedback(`❌ ${barcode}: ${msg}`, false);
+        state.scans.push({ barcode, ok: false, msg });
+        render();
+        scanInput.focus();
+      }
+      return;
+    }
+
+    // 📦 Dispatch Mode
+    if (state.readOnly) {
+      setFeedback('This dispatch is read-only.', false);
+      scanInput.focus();
+      return;
+    }
     if (!DISPATCH_ID) {
       setFeedback('Missing Dispatch ID.', false);
       return;
@@ -418,8 +468,9 @@ if (scanInput) {
   });
 }
 
-// ---------- Unscan ----------
+// ---------- Unscan (Dispatch Mode only) ----------
 async function unscan(barcode) {
+  if (IS_RETURN_MODE) return; // not applicable
   if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
   if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID.', false); return; }
   try {
@@ -448,6 +499,7 @@ if (scanList) {
   scanList.addEventListener('click', async (e) => {
     const btn = e.target.closest('button.remove');
     if (!btn) return;
+    if (IS_RETURN_MODE) return; // no remove in return mode
     if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
     const code = btn.dataset.barcode;
     if (!code) return;
@@ -464,6 +516,7 @@ if (scanList) {
 const countsEl = $('#skuCounts');
 if (countsEl) {
   countsEl.addEventListener('click', async (e) => {
+    if (IS_RETURN_MODE) return; // no counts in return mode
     const chipBtn = e.target.closest('button.chip-remove');
     if (chipBtn) {
       e.stopPropagation();
@@ -493,10 +546,30 @@ if (countsEl) {
 // ---------- Boot ----------
 window.addEventListener('load', async () => {
   await ensurePagePassword();
+
+  if (IS_RETURN_MODE) {
+    // Return Mode boot (not tied to a dispatch)
+    state.readOnly = false;
+    DISPATCH_ID = null;
+    const badge = $('#dispatchBadge');
+    if (badge) {
+      badge.textContent = 'Return Mode';
+      badge.style.display = 'inline-block';
+    }
+    if (scanInput) {
+      scanInput.placeholder = 'Return Mode: scan or enter barcode';
+      scanInput.disabled = authOpen || modalOpen;
+    }
+    resumeScanner();
+    return; // skip dispatch loaders
+  }
+
+  // Dispatch Mode boot
   await loadMeta();
   await loadItemsFromView();
   resumeScanner();
 });
+
 document.addEventListener('click', (e) => {
   if (authOpen || modalOpen) return;
   const t = e.target;
@@ -593,7 +666,7 @@ async function exportXlsx() {
   addAutoFilter(wsDetails);
   XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
 
-  // Sheet 3: Returned Items (live fetch)
+  // Sheet 3: Returned Items (live fetch) — requires DISPATCH_ID (Dispatch export)
   if (DISPATCH_ID) {
     try {
       const res = await fetch(`${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/returns`);
@@ -601,10 +674,10 @@ async function exportXlsx() {
         const data = await res.json();
         const rows = data.rows || data || [];
         if (rows.length > 0) {
-          const wsReturned = XLSX.utils.json_to_sheet(rows, {
-            header: ["barcode", "sku_code", "reason", "created_at"],
-          });
-          wsReturned["!cols"] = autosizeColumnsFromJSON(rows, ["barcode", "sku_code", "reason", "created_at"]);
+          // New columns from dispatch_returns_export_v
+          const headers = ["barcode", "sku_code", "sold_to", "account_name", "date_out", "date_returned"];
+          const wsReturned = XLSX.utils.json_to_sheet(rows, { header: headers });
+          wsReturned["!cols"] = autosizeColumnsFromJSON(rows, headers);
           addAutoFilter(wsReturned);
           XLSX.utils.book_append_sheet(wb, wsReturned, "Returned Items");
         }
