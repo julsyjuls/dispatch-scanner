@@ -36,7 +36,6 @@ function pauseScanner() {
 
 function resumeScanner() {
   if (!scanInput) return;
-  // respect read-only; we’ll set state.readOnly elsewhere
   scanInput.disabled = state.readOnly || authOpen || modalOpen;
   if (!scanInput.disabled) setTimeout(() => scanInput.focus(), 30);
 }
@@ -56,7 +55,7 @@ function getDispatchIdFromURL() {
 }
 let DISPATCH_ID = getDispatchIdFromURL();
 
-// ---------- Password flow (blocks background focus) ----------
+// ---------- Password flow ----------
 function ensurePagePassword() {
   return new Promise((resolve) => {
     const overlay = authOverlay;
@@ -64,16 +63,15 @@ function ensurePagePassword() {
     const submit  = $('#auth-submit');
     const errorEl = $('#auth-error');
 
-    // Keep focus inside the password box
     if (document.activeElement) document.activeElement.blur();
     setTimeout(() => input?.focus(), 0);
 
     function tryUnlock() {
       const val = (input.value || "").trim();
       if (val === PAGE_PASSWORD) {
-        authOpen = false;          // 🟢 unlock
-        overlay?.remove();         // remove overlay
-        resumeScanner();           // enable scanner now
+        authOpen = false;
+        overlay?.remove();
+        resumeScanner();
         resolve(true);
       } else {
         errorEl.textContent = "❌ Incorrect password. Please try again.";
@@ -89,7 +87,7 @@ function ensurePagePassword() {
 
 // ---------- State ----------
 const state = {
-  scans: [],                 // { barcode, ok, msg, sku_code }
+  scans: [],
   skuCounts: new Map(),
   skuItems: new Map(),
   expandedSKUs: new Set(),
@@ -111,7 +109,7 @@ async function loadMeta() {
     state.readOnly = false;
     applyReadOnlyUI(null);
   } finally {
-    resumeScanner(); // ensure disabled/enabled state aligns with readOnly+authOpen+modalOpen
+    resumeScanner();
   }
 }
 
@@ -162,7 +160,6 @@ function removeSkuItem(sku, barcode) {
     state.skuCounts.set(sku, set.size);
   }
 }
-
 function computeTotalItems() {
   let total = 0;
   for (const n of state.skuCounts.values()) total += Number(n) || 0;
@@ -176,7 +173,6 @@ function updateSummaryTotalUI() {
   el.title = `${total} items scanned`;
   el.style.display = total > 0 ? 'inline-flex' : 'none';
 }
-
 function render() {
   const list = $('#scanList');
   if (list) {
@@ -192,7 +188,6 @@ function render() {
       list.appendChild(li);
     }
   }
-
   const counts = $('#skuCounts');
   if (counts) {
     counts.innerHTML = '';
@@ -201,12 +196,10 @@ function render() {
       const li = document.createElement('li');
       li.className = 'sku-row';
       li.dataset.sku = sku;
-
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'toggle';
       toggle.textContent = state.expandedSKUs.has(sku) ? '▼' : '▶';
-
       const set = state.skuItems.get(sku) || new Set();
       const brandSet = new Set();
       for (const code of set) {
@@ -214,35 +207,28 @@ function render() {
         if (b) brandSet.add(b);
       }
       const brandLabel = brandSet.size > 1 ? 'Mixed' : (brandSet.values().next().value || '');
-
       const label = document.createElement('span');
       label.className = 'sku-label';
       label.innerHTML = `${sku} ${brandLabel ? `· <em>${brandLabel}</em>` : ''} <span class="sku-badge">${n}</span>`;
-
       li.appendChild(toggle);
       li.appendChild(label);
-
       if (state.expandedSKUs.has(sku)) {
         const ul = document.createElement('ul');
         ul.className = 'barcode-list';
         ul.style.display = 'flex';
         ul.style.flexDirection = 'column';
         ul.style.gap = '8px';
-
         for (const code of Array.from(set).sort()) {
           const item = document.createElement('li');
           item.className = 'barcode-chip';
           item.style.display = 'flex';
           item.style.alignItems = 'center';
           item.style.gap = '8px';
-
           const brand = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? '';
           const codeSpan = document.createElement('span');
           codeSpan.className = 'chip-code';
           codeSpan.textContent = brand ? `${code} · ${brand}` : code;
-
           item.appendChild(codeSpan);
-
           if (!state.readOnly) {
             const rm = document.createElement('button');
             rm.type = 'button';
@@ -252,12 +238,10 @@ function render() {
             rm.dataset.sku = sku;
             item.appendChild(rm);
           }
-
           ul.appendChild(item);
         }
         li.appendChild(ul);
       }
-
       counts.appendChild(li);
     }
   }
@@ -266,19 +250,17 @@ function render() {
 
 // ---------- Data hydration ----------
 async function loadExisting() {
-  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false); return; }
+  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID.', false); return; }
   try {
     const res = await fetch(`${API_URL}/api/list?dispatch_id=${encodeURIComponent(DISPATCH_ID)}`);
-    if (!res.ok) { setFeedback(`Couldn't load existing scans (HTTP ${res.status})`, false); return; }
+    if (!res.ok) { setFeedback(`Couldn't load existing scans`, false); return; }
     const data = await res.json();
     const rows = data.rows || [];
-
     state.scans = [];
     state.skuCounts.clear();
     state.skuItems.clear();
     state.brandBySku.clear();
     state.brandByBarcode.clear();
-
     for (const r of rows) {
       state.scans.push({ barcode: r.barcode, ok: true, msg: 'Reserved', sku_code: r.sku_code });
       bumpSkuCount(r.sku_code);
@@ -294,30 +276,25 @@ async function loadExisting() {
     setFeedback(`Load failed: ${String(e.message || e)}`, false);
   }
 }
-
 async function loadItemsFromView() {
-  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID. Open this page from a Dispatch.', false); return; }
+  if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID.', false); return; }
   try {
     const res = await fetch(`${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/items`);
-    if (!res.ok) { setFeedback(`Couldn't load items (HTTP ${res.status})`, false); return; }
+    if (!res.ok) { setFeedback(`Couldn't load items`, false); return; }
     const data = await res.json();
     const rows = data.items || [];
-
     state.scans = [];
     state.skuCounts.clear();
     state.skuItems.clear();
     state.brandBySku.clear();
     state.brandByBarcode.clear();
-
     for (const r of rows) {
       const barcode = r.barcode;
       const sku = r.sku_code || '';
       const brand = r.brand_name || null;
-
       state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code: sku });
       bumpSkuCount(sku);
       addSkuItem(sku, barcode);
-
       if (brand) {
         state.brandBySku.set(sku, brand);
         state.brandByBarcode.set(barcode, brand);
@@ -329,7 +306,7 @@ async function loadItemsFromView() {
   }
 }
 
-// ---------- Confirm modal (focus-safe) ----------
+// ---------- Confirm modal ----------
 function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const overlay = $('#confirmOverlay');
   const dialog  = overlay?.querySelector('.modal');
@@ -337,34 +314,26 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
   const msgEl   = $('#confirmMsg');
   const okBtn   = $('#confirmOk');
   const cancelBtn = $('#confirmCancel');
-
-  // Fallback to native confirm if markup missing
   if (!overlay || !titleEl || !msgEl || !okBtn || !cancelBtn || !dialog) {
     const plain = String(htmlMessage).replace(/<[^>]*>/g, '');
     return Promise.resolve(window.confirm(plain));
   }
-
   return new Promise((resolve) => {
     titleEl.textContent = 'Remove item?';
     msgEl.innerHTML = htmlMessage;
     okBtn.textContent = okText;
     cancelBtn.textContent = cancelText;
-
     overlay.hidden = false;
     modalOpen = true;
     pauseScanner();
-
     setTimeout(() => cancelBtn.focus(), 10);
-
     const onKeyDown = (e) => {
       if (!modalOpen) return;
       e.stopPropagation();
       if (e.key === 'Escape') { e.preventDefault(); cleanup(false); }
       else if (e.key === 'Enter') { e.preventDefault(); cleanup(true); }
     };
-
     const onOverlayClick = (e) => { if (e.target === overlay) cleanup(false); };
-
     function cleanup(result) {
       overlay.hidden = true;
       modalOpen = false;
@@ -375,10 +344,8 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
       resumeScanner();
       resolve(result);
     }
-
     okBtn.onclick = () => cleanup(true);
     cancelBtn.onclick = () => cleanup(false);
-
     document.addEventListener('keydown', onKeyDown, true);
     overlay.addEventListener('click', onOverlayClick, true);
     dialog.setAttribute('tabindex', '-1');
@@ -388,32 +355,27 @@ function confirmModal(htmlMessage, okText = 'Remove', cancelText = 'Cancel') {
 // ---------- Scan handler ----------
 if (scanInput) {
   scanInput.addEventListener('keydown', async (e) => {
-    if (authOpen || modalOpen) return; // ⛔️ block while password/modal showing
+    if (authOpen || modalOpen) return;
     if (e.key !== 'Enter') return;
-
     if (state.readOnly) {
       setFeedback('This dispatch is read-only.', false);
       scanInput.value = '';
       scanInput.focus();
       return;
     }
-
     const barcode = e.target.value.trim();
     e.target.value = '';
     if (!barcode) return;
-
     if (!DISPATCH_ID) {
-      setFeedback('Missing Dispatch ID. Open this page via Softr dispatch details.', false);
+      setFeedback('Missing Dispatch ID.', false);
       return;
     }
-
     try {
       const res = await fetch(`${API_URL}/api/scan`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode })
       });
-
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         state.scans.push({ barcode, ok: false, msg: `HTTP ${res.status} ${text}` });
@@ -422,12 +384,10 @@ if (scanInput) {
         scanInput.focus();
         return;
       }
-
       const data = await res.json();
       const item = data.item || (Array.isArray(data.rows) ? data.rows[0] : null);
       const sku_code = item?.sku_code;
       const brand_name = item?.brand_name ?? item?.brand ?? null;
-
       if (data.ok && item?.was_inserted) {
         state.scans.push({ barcode, ok: true, msg: 'Reserved', sku_code });
         bumpSkuCount(sku_code);
@@ -458,7 +418,7 @@ if (scanInput) {
   });
 }
 
-// ---------- Unscan (Remove) ----------
+// ---------- Unscan ----------
 async function unscan(barcode) {
   if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
   if (!DISPATCH_ID) { setFeedback('Missing Dispatch ID.', false); return; }
@@ -474,7 +434,6 @@ async function unscan(barcode) {
       return;
     }
     setFeedback(`↩️ ${barcode}: ${data.msg}`, true);
-
     await loadItemsFromView();
     scanInput?.focus();
   } catch (e) {
@@ -483,31 +442,25 @@ async function unscan(barcode) {
   }
 }
 
-// Event delegation for Recent Scans list
+// ---------- Events ----------
 const scanList = $('#scanList');
 if (scanList) {
   scanList.addEventListener('click', async (e) => {
     const btn = e.target.closest('button.remove');
     if (!btn) return;
-
     if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
-
     const code = btn.dataset.barcode;
     if (!code) return;
-
     const ok = await confirmModal(
       `Remove <strong class="code">${code}</strong> from Dispatch #${DISPATCH_ID}?`,
       'Remove',
       'Cancel'
     );
     if (!ok) { scanInput?.focus(); return; }
-
     await unscan(code);
     scanInput?.focus();
   });
 }
-
-// Toggle expand/collapse + per-barcode remove
 const countsEl = $('#skuCounts');
 if (countsEl) {
   countsEl.addEventListener('click', async (e) => {
@@ -515,7 +468,6 @@ if (countsEl) {
     if (chipBtn) {
       e.stopPropagation();
       if (state.readOnly) { setFeedback('This dispatch is read-only.', false); return; }
-
       const code = chipBtn.dataset.barcode;
       if (!code) return;
       const ok = await confirmModal(
@@ -528,12 +480,10 @@ if (countsEl) {
       scanInput?.focus();
       return;
     }
-
     const row = e.target.closest('.sku-row');
     if (!row) return;
     const sku = row.dataset.sku;
     if (!sku) return;
-
     if (state.expandedSKUs.has(sku)) state.expandedSKUs.delete(sku);
     else state.expandedSKUs.add(sku);
     render();
@@ -542,28 +492,20 @@ if (countsEl) {
 
 // ---------- Boot ----------
 window.addEventListener('load', async () => {
-  // Wait for password before running the app
   await ensurePagePassword();
-
-  // Now we can safely enable scanner (loadMeta may still set readOnly=true)
   await loadMeta();
   await loadItemsFromView();
-
-  // if unlocked and not read-only, focus it just once
   resumeScanner();
 });
-
-// Global click-to-refocus: disabled while password/modal are open
 document.addEventListener('click', (e) => {
   if (authOpen || modalOpen) return;
   const t = e.target;
-  // ignore interactive elements and clicks inside modal overlay
   if (t.closest('#confirmOverlay') ||
       ['INPUT', 'BUTTON', 'A', 'SELECT', 'TEXTAREA', 'LABEL'].includes(t.tagName)) return;
   scanInput?.focus();
 });
 
-// ---------- XLSX Export Helpers ----------
+// ---------- XLSX Export (3 sheets) ----------
 function buildDetailsFromState() {
   const out = [];
   for (const [sku, set] of state.skuItems.entries()) {
@@ -575,7 +517,6 @@ function buildDetailsFromState() {
   out.sort((a, b) => a.sku_code.localeCompare(b.sku_code) || (a.barcode ?? "").localeCompare(b.barcode ?? ""));
   return out;
 }
-
 function buildSummaryFromState() {
   const byKey = new Map();
   for (const [sku, set] of state.skuItems.entries()) {
@@ -596,13 +537,11 @@ function buildSummaryFromState() {
   );
   return rows;
 }
-
 function dateStamp() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
-
 function autosizeColumnsFromJSON(rows, headerOrder) {
   const headers = headerOrder && headerOrder.length ? headerOrder : (rows[0] ? Object.keys(rows[0]) : []);
   const colWidths = headers.map(h => Math.max((h?.length || 0), 4));
@@ -615,13 +554,11 @@ function autosizeColumnsFromJSON(rows, headerOrder) {
   }
   return colWidths.map(ch => ({ wch: Math.min(Math.max(ch + 2, 8), 40) }));
 }
-
 function addAutoFilter(ws) {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
   ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: range.e.r, c: range.e.c } }) };
 }
-
 function appendTotalsRow(ws, label, countColLetter, totalValue) {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
@@ -633,32 +570,49 @@ function appendTotalsRow(ws, label, countColLetter, totalValue) {
   const newRange = { s: range.s, e: { r: nextRowNumber - 1, c: range.e.c } };
   ws['!ref'] = XLSX.utils.encode_range(newRange);
 }
-
-function exportXlsx() {
-  if (typeof XLSX === "undefined") { alert("XLSX library not loaded. Include the SheetJS script tag."); return; }
+async function exportXlsx() {
+  if (typeof XLSX === "undefined") { alert("XLSX library not loaded."); return; }
 
   const summary = buildSummaryFromState();
   const details = buildDetailsFromState();
-
   const wb = XLSX.utils.book_new();
 
+  // Sheet 1: Summary
   const summaryHeaders = ["sku_code", "brand_name", "count"];
   const wsSummary = XLSX.utils.json_to_sheet(summary, { header: summaryHeaders });
-  wsSummary['!cols'] = autosizeColumnsFromJSON(summary, summaryHeaders);
+  wsSummary["!cols"] = autosizeColumnsFromJSON(summary, summaryHeaders);
   addAutoFilter(wsSummary);
-
   const totalCount = summary.reduce((s, r) => s + Number(r.count || 0), 0);
   appendTotalsRow(wsSummary, "Total", "C", totalCount);
-
   XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
-  wb.Workbook = wb.Workbook || {};
-  wb.Workbook.CalcPr = { fullCalcOnLoad: true };
 
+  // Sheet 2: Details
   const detailHeaders = ["sku_code", "barcode", "brand_name"];
   const wsDetails = XLSX.utils.json_to_sheet(details, { header: detailHeaders });
-  wsDetails['!cols'] = autosizeColumnsFromJSON(details, detailHeaders);
+  wsDetails["!cols"] = autosizeColumnsFromJSON(details, detailHeaders);
   addAutoFilter(wsDetails);
   XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
+
+  // Sheet 3: Returned Items (live fetch)
+  if (DISPATCH_ID) {
+    try {
+      const res = await fetch(`${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/returns`);
+      if (res.ok) {
+        const data = await res.json();
+        const rows = data.rows || data || [];
+        if (rows.length > 0) {
+          const wsReturned = XLSX.utils.json_to_sheet(rows, {
+            header: ["barcode", "sku_code", "reason", "created_at"],
+          });
+          wsReturned["!cols"] = autosizeColumnsFromJSON(rows, ["barcode", "sku_code", "reason", "created_at"]);
+          addAutoFilter(wsReturned);
+          XLSX.utils.book_append_sheet(wb, wsReturned, "Returned Items");
+        }
+      }
+    } catch (err) {
+      console.warn("Returned items fetch failed:", err);
+    }
+  }
 
   XLSX.writeFile(wb, `dispatch_export_${dateStamp()}.xlsx`);
 }
