@@ -1,5 +1,5 @@
 // app.js — focus-safe scanner + modal + password (HTML/CSS untouched)
-// v2025-10-07b — Real-time fixes + expandable Summary list with per-SKU barcode details.
+// v2025-10-07c — Realtime + expandable Summary + working XLSX Export (also in read-only)
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -16,6 +16,7 @@ let modalOpen = false;
 // Elements
 const scanInput = $("#scanInput");
 const authOverlay = $("#auth-overlay");
+const exportBtn = $("#btnExportXlsx");
 
 // Disable scanner at start
 if (scanInput) {
@@ -45,11 +46,6 @@ const MODE = getModeFromURL();
 const IS_RETURN_MODE = MODE === "return";
 
 // ---------- Helpers ----------
-function pauseScanner() {
-  if (!scanInput) return;
-  scanInput.blur();
-  scanInput.disabled = true;
-}
 function resumeScanner() {
   if (!scanInput) return;
   const shouldDisable = authOpen || modalOpen || (!IS_RETURN_MODE && state.readOnly);
@@ -142,9 +138,20 @@ function applyReadOnlyUI(statusLower) {
       : "No dispatch selected — open this from Softr";
     badge.style.display = "inline-block";
   }
+
+  // Export button visibility: hide only in Return Mode or when no dispatch id
+  if (exportBtn) {
+    if (IS_RETURN_MODE || !DISPATCH_ID) {
+      exportBtn.style.display = "none";
+    } else {
+      exportBtn.style.display = "inline-block";
+      exportBtn.disabled = false;
+      exportBtn.title = "Export current dispatch to XLSX";
+    }
+  }
 }
 
-// ---------- Show badge ----------
+// ---------- Show badge immediately ----------
 (() => {
   const badge = $("#dispatchBadge");
   if (!badge) return;
@@ -166,19 +173,6 @@ function addSkuItem(sku, barcode) {
   if (!sku || !barcode) return;
   if (!state.skuItems.has(sku)) state.skuItems.set(sku, new Set());
   state.skuItems.get(sku).add(barcode);
-}
-function removeSkuItem(sku, barcode) {
-  const set = state.skuItems.get(sku);
-  if (!set) return;
-  set.delete(barcode);
-  if (set.size === 0) {
-    state.skuItems.delete(sku);
-    state.skuCounts.delete(sku);
-    state.expandedSKUs.delete(sku);
-    state.brandBySku.delete(sku);
-  } else {
-    state.skuCounts.set(sku, set.size);
-  }
 }
 function computeTotalItems() {
   let total = 0;
@@ -258,8 +252,8 @@ function render() {
         if (state.expandedSKUs.has(sku)) {
           const ul = document.createElement("ul");
           ul.className = "barcode-list";
-          // stable order
-          const codes = Array.from(set).sort((a, b) => a.localeCompare(b));
+          const setCodes = state.skuItems.get(sku) || new Set();
+          const codes = Array.from(setCodes).sort((a, b) => a.localeCompare(b));
           for (const code of codes) {
             const item = document.createElement("li");
             const b = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? "";
@@ -299,8 +293,10 @@ async function loadItemsFromView() {
       const sku = r.sku_code || "";
       const brand = r.brand_name || null;
       state.scans.push({ barcode, ok: true, msg: "Reserved", sku_code: sku });
-      bumpSkuCount(sku);
-      addSkuItem(sku, barcode);
+      if (sku) {
+        state.skuCounts.set(sku, (state.skuCounts.get(sku) || 0) + 1);
+        addSkuItem(sku, barcode);
+      }
       if (brand) {
         state.brandBySku.set(sku, brand);
         state.brandByBarcode.set(barcode, brand);
@@ -317,34 +313,72 @@ function toggleSkuRow(sku) {
   else state.expandedSKUs.add(sku);
   render();
 }
-
 function onSkuCountsClick(e) {
   const row = e.target.closest(".sku-row");
   if (!row) return;
   const sku = row.dataset.sku;
-
-  // Click on caret OR label toggles
-  if (
-    e.target.classList.contains("toggle") ||
-    e.target.classList.contains("sku-label")
-  ) {
+  if (e.target.classList.contains("toggle") || e.target.classList.contains("sku-label")) {
     e.preventDefault();
     e.stopPropagation();
     toggleSkuRow(sku);
   }
 }
-
 function onSkuCountsKeydown(e) {
   if (!["Enter", " "].includes(e.key)) return;
   const row = e.target.closest(".sku-row");
   if (!row) return;
-  if (
-    e.target.classList.contains("toggle") ||
-    e.target.classList.contains("sku-label")
-  ) {
+  if (e.target.classList.contains("toggle") || e.target.classList.contains("sku-label")) {
     e.preventDefault();
     e.stopPropagation();
     toggleSkuRow(row.dataset.sku);
+  }
+}
+
+// ---------- XLSX Export ----------
+async function exportDispatchToXlsx() {
+  if (!DISPATCH_ID) {
+    setFeedback("No dispatch selected to export.", false);
+    return;
+  }
+  try {
+    // Always refresh from server to ensure accuracy
+    await loadItemsFromView();
+
+    // Build export rows (sorted by SKU then Barcode)
+    const rows = [];
+    const skus = Array.from(state.skuItems.keys()).sort((a, b) => a.localeCompare(b));
+    for (const sku of skus) {
+      const codes = Array.from(state.skuItems.get(sku) || []).sort((a, b) => a.localeCompare(b));
+      const brand = state.brandBySku.get(sku) || "";
+      for (const code of codes) {
+        rows.push({
+          Dispatch: DISPATCH_ID,
+          SKU: sku || "",
+          Brand: state.brandByBarcode.get(code) || brand || "",
+          Barcode: code,
+        });
+      }
+    }
+
+    if (!rows.length) {
+      setFeedback("Nothing to export for this dispatch.", false);
+      return;
+    }
+
+    // SheetJS must be loaded via <script> in index.html
+    if (typeof XLSX === "undefined") {
+      setFeedback("Export library not loaded. Please check the SheetJS script tag.", false);
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Dispatch");
+    const filename = `dispatch_${DISPATCH_ID}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    setFeedback(`⬇️ Exported ${rows.length} item(s) to ${filename}`);
+  } catch (err) {
+    setFeedback(`Export failed: ${String(err?.message || err)}`, false);
   }
 }
 
@@ -405,12 +439,12 @@ if (scanInput) {
       if (res.ok && data.ok) {
         setFeedback(`✅ ${barcode} reserved`);
 
-        // --- optimistic update ---
+        // optimistic update
         const sku = data?.sku_code || data?.sku || "";
         const brand = data?.brand_name || data?.brand || "";
         state.scans.push({ barcode, ok: true, msg: "Reserved", sku_code: sku });
         if (sku) {
-          bumpSkuCount(sku);
+          state.skuCounts.set(sku, (state.skuCounts.get(sku) || 0) + 1);
           addSkuItem(sku, barcode);
           if (brand) {
             state.brandBySku.set(sku, brand);
@@ -419,7 +453,7 @@ if (scanInput) {
         }
         render();
 
-        // --- reconcile with server ---
+        // reconcile with server
         await loadItemsFromView();
         render();
       } else {
@@ -438,10 +472,17 @@ if (scanInput) {
 window.addEventListener("load", async () => {
   await ensurePagePassword();
 
-  // Hook Summary expand/collapse (event delegation)
+  // Hook Summary expand/collapse
   const counts = $("#skuCounts");
   counts?.addEventListener("click", onSkuCountsClick);
   counts?.addEventListener("keydown", onSkuCountsKeydown);
+
+  // Hook Export
+  exportBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    exportDispatchToXlsx();
+  });
 
   if (IS_RETURN_MODE) {
     state.readOnly = false;
@@ -451,8 +492,7 @@ window.addEventListener("load", async () => {
       badge.textContent = "Return Mode";
       badge.style.display = "inline-block";
     }
-    const btn = document.getElementById("btnExportXlsx");
-    if (btn) btn.style.display = "none"; // hide Export
+    if (exportBtn) exportBtn.style.display = "none"; // hide Export in return mode
     if (scanInput) {
       scanInput.placeholder = "Return Mode: scan or enter barcode";
       scanInput.disabled = authOpen || modalOpen;
@@ -471,11 +511,10 @@ window.addEventListener("load", async () => {
 document.addEventListener("click", (e) => {
   if (authOpen || modalOpen) return;
   const t = e.target;
-
-  // Ignore clicks inside the modal or Summary area
   if (
     t.closest("#confirmOverlay") ||
     t.closest("#skuCounts") ||
+    t.closest("#btnExportXlsx") ||
     ["INPUT", "BUTTON", "A", "SELECT", "TEXTAREA", "LABEL"].includes(t.tagName)
   ) {
     return;
