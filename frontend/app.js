@@ -1,4 +1,6 @@
 // app.js — focus-safe scanner + modal + password (HTML/CSS untouched)
+// v2025-10-07 — Adds optimistic UI update after /api/scan + cache-busted refetch to keep Recent Scans & Summary live.
+
 const $ = (sel) => document.querySelector(sel);
 
 // 🔒 Worker endpoint
@@ -250,7 +252,8 @@ async function loadItemsFromView() {
   if (!DISPATCH_ID) return;
   try {
     const res = await fetch(
-      `${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/items`
+      `${API_URL}/api/dispatch/${encodeURIComponent(DISPATCH_ID)}/items?t=${Date.now()}`,
+      { cache: "no-store" }
     );
     if (!res.ok) return;
     const data = await res.json();
@@ -329,15 +332,35 @@ if (scanInput) {
         body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode }),
       });
       const data = await res.json();
+
       if (res.ok && data.ok) {
         setFeedback(`✅ ${barcode} reserved`);
+
+        // --- optional optimistic update so the UI feels instant ---
+        const sku = data?.sku_code || data?.sku || "";
+        const brand = data?.brand_name || data?.brand || "";
+        state.scans.push({ barcode, ok: true, msg: "Reserved", sku_code: sku });
+        if (sku) {
+          bumpSkuCount(sku);
+          addSkuItem(sku, barcode);
+          if (brand) {
+            state.brandBySku.set(sku, brand);
+            state.brandByBarcode.set(barcode, brand);
+          }
+        }
+        render();
+
+        // --- then reconcile with the server to stay exact ---
+        await loadItemsFromView();
+        render();
       } else {
         setFeedback(`❌ ${barcode}: ${data?.msg || "Error"}`, false);
+        render();
       }
     } catch (err) {
       setFeedback(`❌ ${barcode}: ${String(err?.message || err)}`, false);
+      render();
     }
-    render();
     scanInput.focus();
   });
 }
