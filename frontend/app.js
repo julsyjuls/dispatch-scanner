@@ -359,10 +359,13 @@ async function fetchReturnsForDispatch(dispatchId) {
     const data = await res.json();
     // expect: { items: [{ barcode, sku_code, brand_name, date_returned, ... }] }
     return Array.isArray(data?.items) ? data.items : [];
-  } catch {
+  } catch (err) {
+    console.error("fetchReturnsForDispatch error", err);
     return [];
   }
 }
+
+
 
 
 // ---------- XLSX Export (Summary + Details + Returned Items) ----------
@@ -371,11 +374,15 @@ async function exportDispatchToXlsx() {
     setFeedback("No dispatch selected to export.", false);
     return;
   }
+
   try {
-    // Refresh items (still needed for Summary/Details)
+    // Refresh items to ensure accuracy
     await loadItemsFromView();
 
-    // --- Details sheet from current dispatch items ---
+    // Fetch any returned items from history
+    const returnedItems = await fetchReturnsForDispatch(DISPATCH_ID);
+
+    // Sheet2: Details (sku_code, barcode, brand_name)
     const details = [];
     const skus = Array.from(state.skuItems.keys()).sort((a, b) => a.localeCompare(b));
     for (const sku of skus) {
@@ -390,7 +397,7 @@ async function exportDispatchToXlsx() {
       }
     }
 
-    // --- Summary sheet with TOTAL row ---
+    // Sheet1: Summary (sku_code, brand_name, count) + TOTAL row
     const summary = [];
     let grandTotal = 0;
     for (const sku of skus) {
@@ -401,45 +408,28 @@ async function exportDispatchToXlsx() {
     }
     summary.push({ sku_code: "TOTAL", brand_name: "", count: grandTotal });
 
-    // --- Returned Items sheet (fetch from API history) ---
-    let returned = [];
-    const apiReturned = await fetchReturnsForDispatch(DISPATCH_ID);
-    if (apiReturned.length > 0) {
-      returned = apiReturned
-        .map(r => ({
-          sku_code: r.sku_code || "",
-          barcode: r.barcode,
-          brand_name: r.brand_name || "",
-          // keep extra column if available; Excel will include it if present
-          date_returned: r.date_returned || null
-        }))
-        // stable order: by sku then barcode
-        .sort((a, b) => (a.sku_code || "").localeCompare(b.sku_code || "") || (a.barcode || "").localeCompare(b.barcode || ""));
-    } else {
-      // fallback: session-only returns (if user returned in this same tab)
-      const fallback = [];
-      for (const s of state.scans) {
-        if (String(s.msg || "").toLowerCase() === "returned") {
-          const sku = s.sku_code || "";
-          const brand = state.brandByBarcode.get(s.barcode) || state.brandBySku.get(sku) || "";
-          fallback.push({ sku_code: sku, barcode: s.barcode, brand_name: brand });
-        }
-      }
-      returned = fallback.sort((a, b) => (a.sku_code || "").localeCompare(b.sku_code || "") || (a.barcode || "").localeCompare(b.barcode || ""));
-    }
+    // Sheet3: Returned Items (if any)
+    const returned = (returnedItems || []).map(r => ({
+      sku_code: r.sku_code || "",
+      barcode: r.barcode,
+      brand_name: r.brand_name || "",
+      date_returned: r.date_returned || ""
+    }));
 
     if (!details.length && !returned.length) {
       setFeedback("Nothing to export for this dispatch.", false);
       return;
     }
+
     if (typeof XLSX === "undefined") {
       setFeedback("Export library not loaded. Please check the SheetJS script tag.", false);
       return;
     }
 
-    const wb = XLSX.utils.book_new();
     const wsSummary = XLSX.utils.json_to_sheet(summary);
     const wsDetails = XLSX.utils.json_to_sheet(details);
+    const wb = XLSX.utils.book_new();
+
     XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
     XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
 
@@ -452,9 +442,11 @@ async function exportDispatchToXlsx() {
     XLSX.writeFile(wb, filename);
     setFeedback(`⬇️ Exported to ${filename}`);
   } catch (err) {
+    console.error("Export error:", err);
     setFeedback(`Export failed: ${String(err?.message || err)}`, false);
   }
 }
+
 
 
 // ---------- Scan handler ----------
