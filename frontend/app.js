@@ -1,5 +1,5 @@
 // app.js — focus-safe scanner + modal + password (HTML/CSS untouched)
-// v2025-10-07 — Adds optimistic UI update after /api/scan + cache-busted refetch to keep Recent Scans & Summary live.
+// v2025-10-07b — Real-time fixes + expandable Summary list with per-SKU barcode details.
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -98,11 +98,11 @@ function ensurePagePassword() {
 // ---------- State ----------
 const state = {
   scans: [],
-  skuCounts: new Map(),
-  skuItems: new Map(),
-  expandedSKUs: new Set(),
-  brandBySku: new Map(),
-  brandByBarcode: new Map(),
+  skuCounts: new Map(),     // sku_code -> count
+  skuItems: new Map(),      // sku_code -> Set(barcodes)
+  expandedSKUs: new Set(),  // sku_code
+  brandBySku: new Map(),    // sku_code -> brand_name
+  brandByBarcode: new Map(),// barcode -> brand_name
   readOnly: false,
 };
 
@@ -193,7 +193,9 @@ function updateSummaryTotalUI() {
   el.title = `${total} items scanned`;
   el.style.display = total > 0 ? "inline-flex" : "none";
 }
+
 function render() {
+  // Recent Scans
   const list = $("#scanList");
   if (list) {
     list.innerHTML = "";
@@ -210,6 +212,8 @@ function render() {
       list.appendChild(li);
     }
   }
+
+  // Summary (with expandable rows)
   if (!IS_RETURN_MODE) {
     const counts = $("#skuCounts");
     if (counts) {
@@ -221,29 +225,55 @@ function render() {
         const li = document.createElement("li");
         li.className = "sku-row";
         li.dataset.sku = sku;
+
+        // Toggle button
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "toggle";
+        toggle.setAttribute("aria-expanded", state.expandedSKUs.has(sku) ? "true" : "false");
         toggle.textContent = state.expandedSKUs.has(sku) ? "▼" : "▶";
-        const set = state.skuItems.get(sku) || new Set();
+
+        // Label (clickable)
         const brandSet = new Set();
+        const set = state.skuItems.get(sku) || new Set();
         for (const code of set) {
           const b = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? "";
           if (b) brandSet.add(b);
         }
         const brandLabel =
           brandSet.size > 1 ? "Mixed" : brandSet.values().next().value || "";
-        const label = document.createElement("span");
-        label.className = "sku-label";
-        label.innerHTML = `${sku} ${
+
+        const labelBtn = document.createElement("button");
+        labelBtn.type = "button";
+        labelBtn.className = "sku-label";
+        labelBtn.setAttribute("data-clickable", "1");
+        labelBtn.innerHTML = `${sku} ${
           brandLabel ? `· <em>${brandLabel}</em>` : ""
         } <span class="sku-badge">${n}</span>`;
+
         li.appendChild(toggle);
-        li.appendChild(label);
+        li.appendChild(labelBtn);
+
+        // Expanded details: per-barcode list
+        if (state.expandedSKUs.has(sku)) {
+          const ul = document.createElement("ul");
+          ul.className = "barcode-list";
+          // stable order
+          const codes = Array.from(set).sort((a, b) => a.localeCompare(b));
+          for (const code of codes) {
+            const item = document.createElement("li");
+            const b = state.brandByBarcode.get(code) ?? state.brandBySku.get(sku) ?? "";
+            item.innerHTML = `<code>${code}</code>${b ? ` · <small>${b}</small>` : ""}`;
+            ul.appendChild(item);
+          }
+          li.appendChild(ul);
+        }
+
         counts.appendChild(li);
       }
     }
   }
+
   updateSummaryTotalUI();
 }
 
@@ -263,6 +293,7 @@ async function loadItemsFromView() {
     state.skuItems.clear();
     state.brandBySku.clear();
     state.brandByBarcode.clear();
+
     for (const r of rows) {
       const barcode = r.barcode;
       const sku = r.sku_code || "";
@@ -277,6 +308,44 @@ async function loadItemsFromView() {
     }
     render();
   } catch {}
+}
+
+// ---------- Expand/Collapse handlers for Summary ----------
+function toggleSkuRow(sku) {
+  if (!sku) return;
+  if (state.expandedSKUs.has(sku)) state.expandedSKUs.delete(sku);
+  else state.expandedSKUs.add(sku);
+  render();
+}
+
+function onSkuCountsClick(e) {
+  const row = e.target.closest(".sku-row");
+  if (!row) return;
+  const sku = row.dataset.sku;
+
+  // Click on caret OR label toggles
+  if (
+    e.target.classList.contains("toggle") ||
+    e.target.classList.contains("sku-label")
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSkuRow(sku);
+  }
+}
+
+function onSkuCountsKeydown(e) {
+  if (!["Enter", " "].includes(e.key)) return;
+  const row = e.target.closest(".sku-row");
+  if (!row) return;
+  if (
+    e.target.classList.contains("toggle") ||
+    e.target.classList.contains("sku-label")
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSkuRow(row.dataset.sku);
+  }
 }
 
 // ---------- Scan handler ----------
@@ -336,7 +405,7 @@ if (scanInput) {
       if (res.ok && data.ok) {
         setFeedback(`✅ ${barcode} reserved`);
 
-        // --- optional optimistic update so the UI feels instant ---
+        // --- optimistic update ---
         const sku = data?.sku_code || data?.sku || "";
         const brand = data?.brand_name || data?.brand || "";
         state.scans.push({ barcode, ok: true, msg: "Reserved", sku_code: sku });
@@ -350,7 +419,7 @@ if (scanInput) {
         }
         render();
 
-        // --- then reconcile with the server to stay exact ---
+        // --- reconcile with server ---
         await loadItemsFromView();
         render();
       } else {
@@ -368,6 +437,11 @@ if (scanInput) {
 // ---------- Boot ----------
 window.addEventListener("load", async () => {
   await ensurePagePassword();
+
+  // Hook Summary expand/collapse (event delegation)
+  const counts = $("#skuCounts");
+  counts?.addEventListener("click", onSkuCountsClick);
+  counts?.addEventListener("keydown", onSkuCountsKeydown);
 
   if (IS_RETURN_MODE) {
     state.readOnly = false;
@@ -393,13 +467,18 @@ window.addEventListener("load", async () => {
   resumeScanner();
 });
 
+// Keep focus on scanner except when clicking interactive UI
 document.addEventListener("click", (e) => {
   if (authOpen || modalOpen) return;
   const t = e.target;
+
+  // Ignore clicks inside the modal or Summary area
   if (
     t.closest("#confirmOverlay") ||
+    t.closest("#skuCounts") ||
     ["INPUT", "BUTTON", "A", "SELECT", "TEXTAREA", "LABEL"].includes(t.tagName)
-  )
+  ) {
     return;
+  }
   scanInput?.focus();
 });
