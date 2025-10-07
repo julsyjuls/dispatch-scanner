@@ -175,3 +175,24 @@ li { padding: 8px 10px; border:1px solid #223047; border-radius:10px; margin-bot
 
 /* ✅ FIX: actually hide overlays when hidden */
 .modal-overlay[hidden] { display: none !important; }
+
+/* 🔔 Return Mode banner */
+.mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #1b2430;
+  background: linear-gradient(180deg, #0f1b2b, #0d1624);
+  color: #cde1ff;
+  font-size: 14px;
+}
+.mode-banner strong {
+  color: #8fe1a2;
+}
+.mode-banner em {
+  color: #e7eef7;
+  font-style: normal;
+  font-weight: 600;
+  text-decoration: underline;
+}
