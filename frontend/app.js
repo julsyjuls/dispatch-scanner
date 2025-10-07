@@ -100,6 +100,7 @@ const state = {
   brandBySku: new Map(),    // sku_code -> brand_name
   brandByBarcode: new Map(),// barcode -> brand_name
   readOnly: false,
+  returnedItems: [],        // OPTIONAL: [{ sku, barcode, brand }]
 };
 
 // ---------- Read-only UI ----------
@@ -288,6 +289,9 @@ async function loadItemsFromView() {
     state.brandBySku.clear();
     state.brandByBarcode.clear();
 
+    // Reset returned items (we'll capture any flagged as returned below)
+    state.returnedItems = [];
+
     for (const r of rows) {
       const barcode = r.barcode;
       const sku = r.sku_code || "";
@@ -300,6 +304,16 @@ async function loadItemsFromView() {
       if (brand) {
         state.brandBySku.set(sku, brand);
         state.brandByBarcode.set(barcode, brand);
+      }
+
+      // OPTIONAL: capture returns if API marks items as returned
+      const statusLower = String(r.status || "").toLowerCase();
+      if (r.returned === true || statusLower === "returned") {
+        state.returnedItems.push({
+          sku,
+          barcode,
+          brand: brand || state.brandByBarcode.get(barcode) || state.brandBySku.get(sku) || ""
+        });
       }
     }
     render();
@@ -334,49 +348,83 @@ function onSkuCountsKeydown(e) {
   }
 }
 
-// ---------- XLSX Export ----------
+// ---------- XLSX Export (Summary + Details + Returned Items) ----------
 async function exportDispatchToXlsx() {
   if (!DISPATCH_ID) {
     setFeedback("No dispatch selected to export.", false);
     return;
   }
   try {
-    // Always refresh from server to ensure accuracy
+    // Refresh items to be accurate; also resets returnedItems in loadItemsFromView
     await loadItemsFromView();
 
-    // Build export rows (sorted by SKU then Barcode)
-    const rows = [];
+    // Sheet2: Details (sku_code, barcode, brand_name)
+    const details = [];
     const skus = Array.from(state.skuItems.keys()).sort((a, b) => a.localeCompare(b));
     for (const sku of skus) {
+      const brandDefault = state.brandBySku.get(sku) || "";
       const codes = Array.from(state.skuItems.get(sku) || []).sort((a, b) => a.localeCompare(b));
-      const brand = state.brandBySku.get(sku) || "";
       for (const code of codes) {
-        rows.push({
-          Dispatch: DISPATCH_ID,
-          SKU: sku || "",
-          Brand: state.brandByBarcode.get(code) || brand || "",
-          Barcode: code,
+        details.push({
+          sku_code: sku || "",
+          barcode: code,
+          brand_name: state.brandByBarcode.get(code) || brandDefault || ""
         });
       }
     }
 
-    if (!rows.length) {
+    // Sheet1: Summary (sku_code, brand_name, count) + TOTAL row
+    const summary = [];
+    let grandTotal = 0;
+    for (const sku of skus) {
+      const count = (state.skuItems.get(sku) || new Set()).size;
+      const brand = state.brandBySku.get(sku) || "";
+      grandTotal += count;
+      summary.push({ sku_code: sku || "", brand_name: brand || "", count });
+    }
+    summary.push({ sku_code: "TOTAL", brand_name: "", count: grandTotal });
+
+    // Sheet3: Returned Items (optional)
+    // Prefer items flagged by API; fallback to session “Returned” scans
+    const returnedRows = [...(state.returnedItems || [])];
+    if (returnedRows.length === 0) {
+      for (const s of state.scans) {
+        if (String(s.msg || "").toLowerCase() === "returned") {
+          const sku = s.sku_code || "";
+          const brand = state.brandByBarcode.get(s.barcode) || state.brandBySku.get(sku) || "";
+          returnedRows.push({ sku, barcode: s.barcode, brand });
+        }
+      }
+    }
+    const returned = returnedRows.map(r => ({
+      sku_code: r.sku || r.sku_code || "",
+      barcode: r.barcode,
+      brand_name: r.brand || r.brand_name || ""
+    }));
+
+    if (!details.length && !returned.length) {
       setFeedback("Nothing to export for this dispatch.", false);
       return;
     }
-
-    // SheetJS must be loaded via <script> in index.html
     if (typeof XLSX === "undefined") {
       setFeedback("Export library not loaded. Please check the SheetJS script tag.", false);
       return;
     }
 
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const wsSummary  = XLSX.utils.json_to_sheet(summary);
+    const wsDetails  = XLSX.utils.json_to_sheet(details);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Dispatch");
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+    XLSX.utils.book_append_sheet(wb, wsDetails, "Details");
+
+    if (returned.length > 0) {
+      const wsReturned = XLSX.utils.json_to_sheet(returned);
+      XLSX.utils.book_append_sheet(wb, wsReturned, "Returned Items");
+    }
+
     const filename = `dispatch_${DISPATCH_ID}.xlsx`;
     XLSX.writeFile(wb, filename);
-    setFeedback(`⬇️ Exported ${rows.length} item(s) to ${filename}`);
+    setFeedback(`⬇️ Exported to ${filename}`);
   } catch (err) {
     setFeedback(`Export failed: ${String(err?.message || err)}`, false);
   }
