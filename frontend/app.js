@@ -258,7 +258,7 @@ function render() {
         (s.sku_code ? ` · ${s.sku_code}` : "") +
         (s.msg ? ` · ${s.msg}` : "") +
         (!IS_RETURN_MODE && !state.readOnly
-          ? ` <button class="warn remove" data-barcode="${s.barcode}">Remove</button>`
+          ? ` <button type="button" class="warn remove" data-barcode="${s.barcode}">Remove</button>`
           : "");
       list.appendChild(li);
     }
@@ -612,18 +612,25 @@ window.addEventListener("load", async () => {
   });
 
 
-  // Hook Remove buttons (Recent Scans) via event delegation
-  $("#scanList")?.addEventListener("click", (e) => {
+  // Hook Remove buttons (Recent Scans) — CAPTURE phase so nothing can block it
+document.addEventListener(
+  "click",
+  (e) => {
     const btn = e.target.closest("button.remove");
     if (!btn) return;
+
     e.preventDefault();
-    e.stopPropagation();
 
     const barcode = btn.getAttribute("data-barcode");
     if (!barcode) return;
 
+    // debug
+    console.log("[remove] clicked", barcode);
+
     openConfirmRemove(barcode);
-  });
+  },
+  true // ✅ CAPTURE
+);
 
 
     confirmCancel?.addEventListener("click", (e) => {
