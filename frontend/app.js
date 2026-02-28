@@ -26,6 +26,13 @@ if (scanInput) {
 
 // Hide stray modal if any
 const confirmOverlay = $("#confirmOverlay");
+const confirmMsg = $("#confirmMsg");
+const confirmCancel = $("#confirmCancel");
+const confirmOk = $("#confirmOk");
+
+// Track which barcode we are removing
+let pendingRemoveBarcode = null;
+
 if (confirmOverlay && !confirmOverlay.hasAttribute("hidden")) {
   confirmOverlay.hidden = true;
 }
@@ -59,6 +66,55 @@ function setFeedback(msg, success = true) {
   el.classList.toggle("success", !!success);
   el.classList.toggle("error", !success);
 }
+
+
+function openConfirmRemove(barcode) {
+  pendingRemoveBarcode = barcode;
+  modalOpen = true;
+
+  if (confirmMsg) confirmMsg.textContent = `Remove ${barcode} from this dispatch?`;
+  if (confirmOverlay) confirmOverlay.hidden = false;
+
+  resumeScanner();
+}
+
+function closeConfirmRemove() {
+  pendingRemoveBarcode = null;
+  modalOpen = false;
+
+  if (confirmOverlay) confirmOverlay.hidden = true;
+
+  resumeScanner();
+}
+
+async function doUnscan(barcode) {
+  if (!DISPATCH_ID) {
+    setFeedback("Missing Dispatch ID.", false);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/api/unscan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dispatch_id: DISPATCH_ID, barcode }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && data.ok) {
+      setFeedback(`✅ ${barcode} removed`);
+      await loadItemsFromView(); // refresh list + summary
+      render();
+    } else {
+      setFeedback(`❌ Remove failed: ${data?.msg || `HTTP ${res.status}`}`, false);
+    }
+  } catch (err) {
+    setFeedback(`❌ Remove error: ${String(err?.message || err)}`, false);
+  }
+}
+
+
 
 // ---------- Password ----------
 function ensurePagePassword() {
@@ -535,6 +591,10 @@ if (scanInput) {
   });
 }
 
+
+
+
+
 // ---------- Boot ----------
 window.addEventListener("load", async () => {
   await ensurePagePassword();
@@ -550,6 +610,36 @@ window.addEventListener("load", async () => {
     e.stopPropagation();
     exportDispatchToXlsx();
   });
+
+
+  // Hook Remove buttons (Recent Scans) via event delegation
+  $("#scanList")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button.remove");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const barcode = btn.getAttribute("data-barcode");
+    if (!barcode) return;
+
+    openConfirmRemove(barcode);
+  });
+
+
+    confirmCancel?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeConfirmRemove();
+  });
+
+  confirmOk?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const barcode = pendingRemoveBarcode;
+    closeConfirmRemove();
+    if (barcode) await doUnscan(barcode);
+  });
+  
 
   if (IS_RETURN_MODE) {
     state.readOnly = false;
